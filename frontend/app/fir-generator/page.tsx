@@ -1,75 +1,182 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function FIRGenerator() {
-  const [description, setDescription] = useState("");
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const router = useRouter();
 
-  // Simulating the FastAPI backend call
+  const [formData, setFormData] = useState({
+    complainantName: "",
+    contactNumber: "",
+    address: "",
+    crimeDate: "",
+    crimeTime: "",
+    crimeLocation: "",
+    description: ""
+  });
+
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [assignedStation, setAssignedStation] = useState("");
+
+  const jurisdictionMap: Record<string, string> = {
+    "mumbai": "Cyber Police Station, BKC, Mumbai",
+    "pune": "Cyber Police Station, Shivajinagar, Pune",
+    "nagpur": "Cyber Police Station, Nagpur",
+    "nashik": "Cyber Police Station, Nashik"
+  };
+
   const analyzeText = (text: string) => {
-    setDescription(text);
     const textLower = text.toLowerCase();
     const newSuggestions = [];
-    
+
     if (textLower.includes("digital arrest") || textLower.includes("extort")) {
       newSuggestions.push("BNS 308: Extortion");
     }
+
     if (textLower.includes("fake app") || textLower.includes("trading fraud")) {
-      newSuggestions.push("BNS 318(4): Cheating / Inducing delivery of property");
-      newSuggestions.push("IT Act 66D: Cheating by personation");
+      newSuggestions.push("BNS 318(4): Cheating");
+      newSuggestions.push("IT Act 66D: Cheating by Personation");
     }
+
     setSuggestions(newSuggestions);
   };
 
-  return (
-    <div className="max-w-4xl bg-white p-8 rounded-xl shadow-sm border border-slate-200">
-      <h1 className="text-2xl font-bold mb-6 text-slate-800">CCTNS Intelligent FIR Generator</h1>
-      
-      <form className="space-y-6">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-             <label className="block text-sm font-medium mb-1">Complainant Name</label>
-             <input type="text" className="w-full p-2 border rounded-md" />
-          </div>
-          <div>
-             <label className="block text-sm font-medium mb-1">Police Station</label>
-             <select className="w-full p-2 border rounded-md">
-               <option>Cyber Police Station, BKC, Mumbai</option>
-               <option>Cyber Police Station, Shivajinagar, Pune</option>
-             </select>
-          </div>
-        </div>
+  const handleChange = (e: any) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Brief Facts of the Case</label>
-          <textarea 
-            rows={6} 
-            value={description}
-            onChange={(e) => analyzeText(e.target.value)}
-            className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            placeholder="E.g., The complainant received a WhatsApp call claiming to be from CBI, placing them under 'digital arrest'..."
+    if (name === "description") {
+      analyzeText(value);
+    }
+  };
+
+  const handleRegister = () => {
+    const location = formData.crimeLocation.toLowerCase();
+    let station = "Jurisdiction Not Found - Manual Review Required";
+
+    Object.keys(jurisdictionMap).forEach((key) => {
+      if (location.includes(key)) {
+        station = jurisdictionMap[key];
+      }
+    });
+
+    setAssignedStation(station);
+
+    // Redirect after short delay
+    setTimeout(() => {
+      router.push(`/jurisdiction?station=${encodeURIComponent(station)}`);
+    }, 1500);
+  };
+
+  return (
+  <div className="min-h-screen overflow-y-auto bg-gray-50 py-10">
+    <div className="max-w-5xl mx-auto bg-white p-10 rounded-xl shadow-md border border-slate-200 text-black">
+
+      <h1 className="text-3xl font-bold mb-8 text-center text-black">
+        FIRST INFORMATION REPORT (FIR)
+      </h1>
+
+      <div className="space-y-6">
+
+        {/* Complainant Details */}
+        <h2 className="font-semibold text-lg border-b pb-2 text-black">
+          Complainant Details
+        </h2>
+
+        <input
+          type="text"
+          name="complainantName"
+          placeholder="Full Name"
+          className="w-full p-3 border rounded-md text-black"
+          onChange={handleChange}
+        />
+
+        <input
+          type="text"
+          name="contactNumber"
+          placeholder="Contact Number"
+          className="w-full p-3 border rounded-md text-black"
+          onChange={handleChange}
+        />
+
+        <input
+          type="text"
+          name="address"
+          placeholder="Residential Address"
+          className="w-full p-3 border rounded-md text-black"
+          onChange={handleChange}
+        />
+
+        {/* Crime Details */}
+        <h2 className="font-semibold text-lg border-b pb-2 mt-8 text-black">
+          Crime Details
+        </h2>
+
+        <div className="grid grid-cols-2 gap-4">
+          <input
+            type="date"
+            name="crimeDate"
+            className="p-3 border rounded-md text-black"
+            onChange={handleChange}
+          />
+          <input
+            type="time"
+            name="crimeTime"
+            className="p-3 border rounded-md text-black"
+            onChange={handleChange}
           />
         </div>
 
-        {/* AI Suggestions Box */}
+        <input
+          type="text"
+          name="crimeLocation"
+          placeholder="Place of Occurrence (City / District)"
+          className="w-full p-3 border rounded-md text-black"
+          onChange={handleChange}
+        />
+
+        <textarea
+          name="description"
+          rows={6}
+          placeholder="Brief Facts of the Case..."
+          className="w-full p-3 border rounded-lg text-black"
+          onChange={handleChange}
+        />
+
+        {/* AI Suggested Sections */}
         {suggestions.length > 0 && (
-          <div className="p-5 bg-blue-50 border-l-4 border-blue-600 rounded-r-lg shadow-sm animate-in fade-in">
-            <h3 className="text-sm font-bold text-blue-900 mb-3">⚖️ AI Suggested Legal Sections:</h3>
-            <div className="flex flex-wrap gap-2">
-              {suggestions.map((sec, idx) => (
-                <span key={idx} className="bg-blue-100 text-blue-800 text-xs font-semibold px-3 py-1.5 rounded-md border border-blue-200">
-                  {sec}
-                </span>
-              ))}
-            </div>
-            <p className="text-xs text-blue-600 mt-3">* Verify sections against the latest BNS manual before generating final FIR.</p>
+          <div className="p-4 bg-blue-50 border-l-4 border-blue-600 rounded-md text-black">
+            <h3 className="font-bold mb-2 text-black">
+              AI Suggested Legal Sections:
+            </h3>
+            {suggestions.map((sec, idx) => (
+              <div key={idx} className="text-sm text-black">
+                • {sec}
+              </div>
+            ))}
           </div>
         )}
 
-        <button type="button" className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 transition-colors">
-          Generate Official CCTNS Draft
+        {/* Register Button */}
+        <button
+          onClick={handleRegister}
+          className="w-full bg-black text-white py-3 rounded-lg font-bold hover:bg-gray-800 transition"
+        >
+          Register FIR
         </button>
-      </form>
+
+        {/* Assigned Station */}
+        {assignedStation && (
+          <div className="mt-4 p-4 bg-green-50 border-l-4 border-green-600 rounded-md text-black">
+            <p className="font-semibold text-black">
+              Case Assigned To:
+            </p>
+            <p className="text-black">{assignedStation}</p>
+          </div>
+        )}
+
+      </div>
     </div>
-  );
+  </div>
+);
 }

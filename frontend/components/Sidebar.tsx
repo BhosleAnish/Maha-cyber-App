@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LayoutDashboard, FileText, Scale, BookOpen, ShieldAlert } from "lucide-react";
+import { LayoutDashboard, FileText, Scale, BookOpen, ShieldAlert, ArrowLeftRight } from "lucide-react";
 
 export default function Sidebar() {
   return (
@@ -25,12 +25,16 @@ export default function Sidebar() {
           <Scale size={20} className="text-slate-300" />
           <span>Smart FIR</span>
         </Link>
+        <Link href="/ipc-mapper" className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-800 transition-colors">
+          <ArrowLeftRight size={20} className="text-slate-300" />
+          <span>IPC → BNS Mapper</span>
+        </Link>
         <Link href="/it-act" className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-800 transition-colors">
           <BookOpen size={20} className="text-slate-300" />
           <span>IT Act Search</span>
         </Link>
       </nav>
-
+      
       <div className="p-4 border-t border-slate-700">
         <div className="flex items-center gap-3 p-2 bg-slate-800 rounded-lg">
           <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center font-bold">
