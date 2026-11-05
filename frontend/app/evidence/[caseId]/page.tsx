@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
   Save, FileText, Smartphone, HardDrive, MapPin, User, Calendar,
   ShieldAlert, Loader2, Network, X, Plus, Upload, Image, File,
@@ -423,7 +424,7 @@ export default function EvidencePage() {
         const dx = to.x - from.x;
         const dy = to.y - from.y;
         const dist = Math.hypot(dx, dy) || 1;
-        const force = (dist - 280) * 0.01 * alpha;
+        const force = (dist - 320) * 0.01 * alpha;
         from.vx += (dx / dist) * force;
         from.vy += (dy / dist) * force;
         to.vx -= (dx / dist) * force;
@@ -960,6 +961,15 @@ export default function EvidencePage() {
                     onMouseLeave={handleCanvasMouseUp}
                     style={{ display: "block", minHeight: "max(500px, calc(100vh - 150px))" }}
                   />
+
+                  {/* Chain of custody report */}
+                  <Link
+                    href={`/evidence/${caseId}/report`}
+                    className="absolute top-4 right-[68px] flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors hover:bg-white/5"
+                    style={{ background: "#111b2e", border: "1px solid #334155", color: "#e2e8f0" }}
+                  >
+                    <FileText className="w-4 h-4" style={{ color: "#93c5fd" }} /> Chain of Custody Report
+                  </Link>
 
                   {/* Graph controls */}
                   <div className="absolute top-4 right-4 flex flex-col rounded-lg overflow-hidden" style={{ background: "#111b2e", border: "1px solid #243247" }}>
