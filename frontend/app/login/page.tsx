@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { ShieldAlert, Loader2, Mail, Lock, KeyRound, User, BadgeCheck } from "lucide-react";
+import { ShieldAlert, Loader2, Mail, Lock, User, BadgeCheck } from "lucide-react";
 
 const API = "/backend/api/auth";
 
-type Mode = "login" | "register" | "otp";
+type Mode = "login" | "register";
 
 export default function LoginPage() {
   const [mode, setMode] = useState<Mode>("login");
@@ -14,9 +14,6 @@ export default function LoginPage() {
   const [badge, setBadge] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [otp, setOtp] = useState("");
-  const [challengeId, setChallengeId] = useState("");
-  const [emailHint, setEmailHint] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
@@ -48,12 +45,9 @@ export default function LoginPage() {
   const submitLogin = (e: React.FormEvent) => {
     e.preventDefault();
     run(async () => {
-      const data = await post("login", { email, password });
-      setChallengeId(data.challenge_id);
-      setEmailHint(data.email_hint);
-      setPassword("");
-      setOtp("");
-      setMode("otp");
+      const res = await signIn("credentials", { email, password, redirect: false });
+      if (!res || res.error) throw new Error("Invalid email or password");
+      window.location.href = "/";
     });
   };
 
@@ -64,15 +58,6 @@ export default function LoginPage() {
       setPassword("");
       setMode("login");
       setInfo("Account created. Sign in to continue.");
-    });
-  };
-
-  const submitOtp = (e: React.FormEvent) => {
-    e.preventDefault();
-    run(async () => {
-      const res = await signIn("credentials", { challengeId, otp, redirect: false });
-      if (!res || res.error) throw new Error("Incorrect or expired code. Please sign in again.");
-      window.location.href = "/";
     });
   };
 
@@ -123,7 +108,7 @@ export default function LoginPage() {
               <input className={field} required placeholder="Badge number" value={badge} onChange={(e) => setBadge(e.target.value)} />
             </div>
             <div className="relative"><Mail className={icon} />
-              <input className={field} type="email" required autoComplete="email" placeholder="Official email (receives login codes)" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <input className={field} type="email" required autoComplete="email" placeholder="Official email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             <div className="relative"><Lock className={icon} />
               <input className={field} type="password" required minLength={10} autoComplete="new-password" placeholder="Password (min 10 characters)" value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -136,19 +121,6 @@ export default function LoginPage() {
           </form>
         )}
 
-        {mode === "otp" && (
-          <form onSubmit={submitOtp} className="space-y-3">
-            <h2 className="font-semibold mb-1">Verify it&apos;s you</h2>
-            <p className="text-xs text-slate-400">Enter the 6-digit code we emailed to {emailHint}. It expires in 5 minutes.</p>
-            <div className="relative"><KeyRound className={icon} />
-              <input className={`${field} tracking-[0.4em] text-center`} required inputMode="numeric" autoComplete="one-time-code" pattern="\d{6}" maxLength={6} placeholder="••••••" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} autoFocus />
-            </div>
-            <button className={button} disabled={loading || otp.length !== 6}>{loading && <Loader2 className="w-4 h-4 animate-spin" />} Verify &amp; sign in</button>
-            <p className="text-xs text-slate-400 text-center pt-2">
-              <button type="button" className="text-blue-400 hover:underline" onClick={() => { setError(""); setMode("login"); }}>Back to sign in</button>
-            </p>
-          </form>
-        )}
       </div>
     </div>
   );

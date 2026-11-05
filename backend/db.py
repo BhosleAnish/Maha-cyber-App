@@ -41,9 +41,6 @@ def init_db() -> None:
     db.officers.create_index("badge_number", unique=True)
     db.evidences.create_index([("case_id", ASCENDING), ("id", ASCENDING)])
     db.correlations.create_index([("case_id", ASCENDING), ("id", ASCENDING)])
-    db.login_otps.create_index("officer_id")
-    # Mongo deletes expired OTP challenges automatically
-    db.login_otps.create_index("expires_at", expireAfterSeconds=0)
 
 
 def next_id(db: Database, name: str) -> int:
