@@ -4,7 +4,7 @@ import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { ShieldAlert, Loader2, Mail, Lock, KeyRound, User, BadgeCheck } from "lucide-react";
 
-const API = "http://localhost:8000/api/auth";
+const API = "/backend/api/auth";
 
 type Mode = "login" | "register" | "otp";
 

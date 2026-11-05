@@ -143,8 +143,8 @@ export default function EvidencePage() {
   useEffect(() => {
     if (!caseId) return;
     Promise.all([
-      fetch(`http://localhost:8000/api/cases/${caseId}/evidence`).then(r => r.ok ? r.json() : []),
-      fetch(`http://localhost:8000/api/cases/${caseId}/correlations`).then(r => r.ok ? r.json() : []),
+      fetch(`/backend/api/cases/${caseId}/evidence`).then(r => r.ok ? r.json() : []),
+      fetch(`/backend/api/cases/${caseId}/correlations`).then(r => r.ok ? r.json() : []),
     ]).then(([evData, corrData]) => {
       setEvidenceList(evData);
       setCorrelations(corrData);
@@ -537,13 +537,13 @@ export default function EvidencePage() {
     };
 
     try {
-      const res = await fetch(`http://localhost:8000/api/cases/${caseId}/evidence`, {
+      const res = await fetch(`/backend/api/cases/${caseId}/evidence`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (res.ok) {
-        const updated = await fetch(`http://localhost:8000/api/cases/${caseId}/evidence`);
+        const updated = await fetch(`/backend/api/cases/${caseId}/evidence`);
         if (updated.ok) setEvidenceList(await updated.json());
         // Reset
         setCollectedDate(""); setCollectedFrom(""); setLocation("");
@@ -564,13 +564,13 @@ export default function EvidencePage() {
   const handleAddCorrelation = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch(`http://localhost:8000/api/cases/${caseId}/correlations`, {
+      const res = await fetch(`/backend/api/cases/${caseId}/correlations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ from_evidence: corrFrom, to_evidence: corrTo, relationshipType: corrType, description: corrDesc }),
       });
       if (res.ok) {
-        const updated = await fetch(`http://localhost:8000/api/cases/${caseId}/correlations`);
+        const updated = await fetch(`/backend/api/cases/${caseId}/correlations`);
         if (updated.ok) setCorrelations(await updated.json());
         setCorrFrom(""); setCorrTo(""); setCorrType("Related to"); setCorrDesc("");
         setShowCorrelationModal(false);
@@ -586,7 +586,7 @@ export default function EvidencePage() {
     setAiError("");
     setAiSuggestions([]);
     try {
-      const res = await fetch(`http://localhost:8000/api/cases/${caseId}/ai-correlate`, { method: "POST" });
+      const res = await fetch(`/backend/api/cases/${caseId}/ai-correlate`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || "AI correlation failed");
       setAiSuggestions(data.suggestions || []);
@@ -599,7 +599,7 @@ export default function EvidencePage() {
 
   const acceptAiSuggestion = async (s: AiSuggestion) => {
     try {
-      const res = await fetch(`http://localhost:8000/api/cases/${caseId}/correlations`, {
+      const res = await fetch(`/backend/api/cases/${caseId}/correlations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -608,7 +608,7 @@ export default function EvidencePage() {
         }),
       });
       if (res.ok) {
-        const updated = await fetch(`http://localhost:8000/api/cases/${caseId}/correlations`);
+        const updated = await fetch(`/backend/api/cases/${caseId}/correlations`);
         if (updated.ok) setCorrelations(await updated.json());
         setAiSuggestions(prev => prev.filter(x => x !== s));
       }

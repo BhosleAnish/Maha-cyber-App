@@ -1,7 +1,14 @@
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 
-const BACKEND_URL = (process.env.BACKEND_URL || "http://localhost:8000").trim();
+// On Render, BACKEND_URL is "host:port" (no scheme), so add one if missing
+const rawBackend = (process.env.BACKEND_URL || "http://localhost:8000").trim();
+const BACKEND_URL = /^https?:\/\//.test(rawBackend) ? rawBackend : `http://${rawBackend}`;
+
+// Render provides the public URL; NextAuth needs it for callbacks
+if (!process.env.NEXTAUTH_URL && process.env.RENDER_EXTERNAL_URL) {
+  process.env.NEXTAUTH_URL = process.env.RENDER_EXTERNAL_URL;
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
