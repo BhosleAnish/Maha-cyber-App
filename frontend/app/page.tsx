@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { signOut } from "next-auth/react";
 import { ShieldAlert, Newspaper, FolderOpen, LogOut, User, Loader2, ExternalLink } from "lucide-react";
 
 interface CaseItem {
@@ -65,8 +66,7 @@ export default function HomeDashboard() {
   }, []);
 
   const handleLogout = () => {
-    alert("Logging out of Maharashtra Cyber...");
-    // In production: signOut() from next-auth
+    signOut({ callbackUrl: "/login" });
   };
 
   const formatDate = (dateString: string) => {

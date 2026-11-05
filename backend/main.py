@@ -15,6 +15,7 @@ load_dotenv()
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from models import Base, Case, Evidence, Correlation
+from auth import router as auth_router
 
 # --- Database Setup (SQLite for local testing) ---
 SQLALCHEMY_DATABASE_URL = "sqlite:///./maha_cyber.db"
@@ -34,6 +35,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 # --- Dependency: Get Database Session ---
 def get_db():
