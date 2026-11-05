@@ -29,7 +29,7 @@ export default function HomeDashboard() {
   useEffect(() => {
     const fetchCases = async () => {
       try {
-        const response = await fetch("http://localhost:8000/api/cases");
+        const response = await fetch("/backend/api/cases");
         if (response.ok) {
           const data = await response.json();
           setCases(data);
@@ -49,7 +49,7 @@ export default function HomeDashboard() {
   useEffect(() => {
     const fetchNews = async () => {
       try {
-        const response = await fetch("http://localhost:8000/api/news/cyber");
+        const response = await fetch("/backend/api/news/cyber");
         if (response.ok) {
           const data = await response.json();
           setNews(data.slice(0, 5)); // Show top 5 news items

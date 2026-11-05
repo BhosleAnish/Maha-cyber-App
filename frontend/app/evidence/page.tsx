@@ -35,7 +35,7 @@ export default function EvidenceDashboardPage() {
 
   const fetchCases = async () => {
     try {
-      const response = await fetch("http://localhost:8000/api/cases");
+      const response = await fetch("/backend/api/cases");
       if (response.ok) {
         const data = await response.json();
         setCases(data);
@@ -60,7 +60,7 @@ export default function EvidenceDashboardPage() {
     setIsSaving(true);
 
     try {
-      const response = await fetch("http://localhost:8000/api/cases", {
+      const response = await fetch("/backend/api/cases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newCase),

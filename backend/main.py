@@ -18,8 +18,12 @@ from models import Base, Case, Evidence, Correlation
 from auth import router as auth_router
 
 # --- Database Setup (SQLite for local testing) ---
-SQLALCHEMY_DATABASE_URL = "sqlite:///./maha_cyber.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+# Postgres in production (DATABASE_URL), SQLite file for local development
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./maha_cyber.db")
+if SQLALCHEMY_DATABASE_URL.startswith("postgres://"):  # older Render/Heroku style URL
+    SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
+_connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=_connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Create tables in the database file
@@ -30,7 +34,8 @@ app = FastAPI(title="Maha Cyber API")
 # --- CORS Configuration ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, change to ["http://localhost:3000"]
+    # Comma-separated list in CORS_ORIGINS; the deployed frontend proxies via /backend so "*" is only a default
+    allow_origins=[o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

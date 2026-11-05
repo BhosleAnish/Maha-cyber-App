@@ -1,7 +1,8 @@
 "use client";
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
-export default function JurisdictionPage() {
+function JurisdictionContent() {
   const params = useSearchParams();
   const station = params.get("station");
 
@@ -23,5 +24,13 @@ export default function JurisdictionPage() {
         The concerned Cyber Police Station will initiate investigation as per CCTNS protocol.
       </p>
     </div>
+  );
+}
+
+export default function JurisdictionPage() {
+  return (
+    <Suspense fallback={null}>
+      <JurisdictionContent />
+    </Suspense>
   );
 }
