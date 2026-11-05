@@ -64,6 +64,3 @@ Officers sign in with email + password, then confirm a 6-digit one-time code ema
 Setup
 backend/.env: GROQ_API_KEY, and for email delivery SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM. With no SMTP_HOST and OTP_CONSOLE_FALLBACK=true (development only) the code is printed in the backend log instead.
 frontend/.env.local: NEXTAUTH_SECRET (long random string), NEXTAUTH_URL=http://localhost:3000, BACKEND_URL=http://localhost:8000
-
-Deploying on Render
-Create a free Postgres project at neon.com (no card needed), copy its connection string (ends with ?sslmode=require), then in Render use New > Blueprint on this repo and paste it as DATABASE_URL along with the other prompted secrets. Neon's free database suspends after 5 minutes idle and wakes on the next request.

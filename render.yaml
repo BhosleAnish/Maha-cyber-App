@@ -1,6 +1,9 @@
 # Render Blueprint: Dashboard > New > Blueprint > pick this repo.
-# Fill the "sync: false" secrets when prompted. Free web services sleep when idle.
-# The database is an external free Neon Postgres (no expiry): paste its connection string as DATABASE_URL.
+# Fill the "sync: false" secrets when prompted. Free Postgres expires after 30 days; free web services sleep when idle.
+databases:
+  - name: maha-cyber-db
+    plan: free
+    databaseName: maha_cyber
 
 services:
   - type: web
@@ -15,7 +18,9 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: maha-cyber-db
+          property: connectionString
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
