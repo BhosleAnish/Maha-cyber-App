@@ -12,22 +12,20 @@ if (!process.env.NEXTAUTH_URL && process.env.RENDER_EXTERNAL_URL) {
 
 export const authOptions: NextAuthOptions = {
   providers: [
-    // Step 2 of login. Step 1 (email + password) happens against the backend
-    // /api/auth/login, which emails an OTP and returns a challenge id. The session
-    // is only created once the emailed OTP is verified here.
+    // Email + password, verified by the backend /api/auth/login.
     CredentialsProvider({
-      name: "Email OTP",
+      name: "Email and password",
       credentials: {
-        challengeId: { label: "Challenge", type: "text" },
-        otp: { label: "OTP", type: "text" },
+        email: { label: "Email", type: "text" },
+        password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.challengeId || !credentials?.otp) return null;
+        if (!credentials?.email || !credentials?.password) return null;
         try {
-          const res = await fetch(`${BACKEND_URL}/api/auth/verify-otp`, {
+          const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ challenge_id: credentials.challengeId, otp: credentials.otp }),
+            body: JSON.stringify({ email: credentials.email, password: credentials.password }),
           });
           if (!res.ok) return null;
           const u = await res.json();

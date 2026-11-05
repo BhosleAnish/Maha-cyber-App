@@ -59,10 +59,10 @@ Graph visualization libraries (for Evidence Graph)
 NLP integration (optional, for Smart FIR enhancements)
 
 Authentication
-Officers sign in with email + password, then confirm a 6-digit one-time code emailed to their registered address (MFA). Sessions last 8 hours.
+Officers sign in with email + password. Sessions last 8 hours.
 
 Setup
-backend/.env: GROQ_API_KEY, and for email delivery SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM. With no SMTP_HOST and OTP_CONSOLE_FALLBACK=true (development only) the code is printed in the backend log instead.
+backend/.env: GROQ_API_KEY,.
 frontend/.env.local: NEXTAUTH_SECRET (long random string), NEXTAUTH_URL=http://localhost:3000, BACKEND_URL=http://localhost:8000
 
 Database
