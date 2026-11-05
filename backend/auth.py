@@ -11,9 +11,11 @@ from email.message import EmailMessage
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from pymongo import ReturnDocument
+from pymongo.database import Database
+from pymongo.errors import DuplicateKeyError
 
-from models import Officer, LoginOtp
+from db import get_db, next_id
 
 log = logging.getLogger("auth")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -22,12 +24,6 @@ OTP_TTL = timedelta(minutes=5)
 MAX_OTP_ATTEMPTS = 5
 MIN_PASSWORD_LEN = 10
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-def get_db():
-    # Imported lazily to avoid a circular import with main.py
-    from main import get_db as _get_db
-    yield from _get_db()
 
 
 # ---------- hashing (stdlib scrypt, no extra dependency) ----------
@@ -109,7 +105,7 @@ def _norm_email(e: str) -> str:
 
 # ---------- endpoints ----------
 @router.post("/register")
-def register(body: RegisterIn, db: Session = Depends(get_db)):
+def register(body: RegisterIn, db: Database = Depends(get_db)):
     email = _norm_email(body.email)
     name, badge = body.name.strip(), body.badge_number.strip()
     if not name or not badge:
@@ -118,47 +114,59 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
         raise HTTPException(400, "Invalid email address")
     if len(body.password) < MIN_PASSWORD_LEN:
         raise HTTPException(400, f"Password must be at least {MIN_PASSWORD_LEN} characters")
-    if db.query(Officer).filter((Officer.email == email) | (Officer.badge_number == badge)).first():
+    if db.officers.find_one({"$or": [{"email": email}, {"badge_number": badge}]}):
         raise HTTPException(409, "An account with this email or badge number already exists")
-    db.add(Officer(name=name, badge_number=badge, email=email, password_hash=hash_secret(body.password)))
-    db.commit()
+    try:
+        db.officers.insert_one({
+            "id": next_id(db, "officers"), "name": name, "badge_number": badge, "email": email,
+            "password_hash": hash_secret(body.password), "created_at": datetime.utcnow(),
+        })
+    except DuplicateKeyError:  # lost a race with a concurrent registration
+        raise HTTPException(409, "An account with this email or badge number already exists")
     return {"message": "Account created"}
 
 
 @router.post("/login")
-def login(body: LoginIn, db: Session = Depends(get_db)):
+def login(body: LoginIn, db: Database = Depends(get_db)):
     """Step 1: check password, email a one-time code, return a challenge id."""
-    officer = db.query(Officer).filter(Officer.email == _norm_email(body.email)).first()
-    ok = verify_secret(body.password, officer.password_hash if officer else _DUMMY_HASH)
+    officer = db.officers.find_one({"email": _norm_email(body.email)})
+    ok = verify_secret(body.password, officer["password_hash"] if officer else _DUMMY_HASH)
     if not officer or not ok:
         raise HTTPException(401, "Invalid email or password")
 
     # Invalidate earlier pending challenges for this officer
-    db.query(LoginOtp).filter(LoginOtp.officer_id == officer.id, LoginOtp.used == 0).update({"used": 1})
+    db.login_otps.update_many({"officer_id": officer["id"], "used": False}, {"$set": {"used": True}})
 
     otp = f"{secrets.randbelow(10**6):06d}"
     challenge_id = secrets.token_urlsafe(24)
-    db.add(LoginOtp(id=challenge_id, officer_id=officer.id, otp_hash=hash_secret(otp),
-                    expires_at=datetime.utcnow() + OTP_TTL))
-    db.commit()
-    send_otp_email(officer.email, otp)
+    db.login_otps.insert_one({
+        "_id": challenge_id, "officer_id": officer["id"], "otp_hash": hash_secret(otp),
+        "expires_at": datetime.utcnow() + OTP_TTL, "attempts": 0, "used": False,
+        "created_at": datetime.utcnow(),
+    })
+    send_otp_email(officer["email"], otp)
 
-    local, _, domain = officer.email.partition("@")
+    local, _, domain = officer["email"].partition("@")
     return {"challenge_id": challenge_id, "email_hint": f"{local[:2]}***@{domain}"}
 
 
 @router.post("/verify-otp")
-def verify_otp(body: VerifyIn, db: Session = Depends(get_db)):
+def verify_otp(body: VerifyIn, db: Database = Depends(get_db)):
     """Step 2: check the emailed code; returns the officer profile on success."""
-    ch = db.query(LoginOtp).filter(LoginOtp.id == body.challenge_id).first()
-    if not ch or ch.used or ch.expires_at < datetime.utcnow() or ch.attempts >= MAX_OTP_ATTEMPTS:
+    # Atomically count this attempt, only if the challenge is still usable
+    ch = db.login_otps.find_one_and_update(
+        {"_id": body.challenge_id, "used": False, "attempts": {"$lt": MAX_OTP_ATTEMPTS},
+         "expires_at": {"$gt": datetime.utcnow()}},
+        {"$inc": {"attempts": 1}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not ch:
         raise HTTPException(401, "Code expired or invalid. Please sign in again.")
-    ch.attempts += 1
-    if not verify_secret(body.otp.strip(), ch.otp_hash):
-        db.commit()
+    if not verify_secret(body.otp.strip(), ch["otp_hash"]):
         raise HTTPException(401, "Incorrect code")
-    ch.used = 1
-    db.commit()
-    officer = db.query(Officer).filter(Officer.id == ch.officer_id).first()
-    return {"id": str(officer.id), "name": officer.name, "email": officer.email,
-            "badge_number": officer.badge_number}
+    # Single use: only one concurrent request can flip used False -> True
+    if db.login_otps.update_one({"_id": ch["_id"], "used": False}, {"$set": {"used": True}}).modified_count != 1:
+        raise HTTPException(401, "Code expired or invalid. Please sign in again.")
+    officer = db.officers.find_one({"id": ch["officer_id"]})
+    return {"id": str(officer["id"]), "name": officer["name"], "email": officer["email"],
+            "badge_number": officer["badge_number"]}

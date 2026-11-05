@@ -64,3 +64,10 @@ Officers sign in with email + password, then confirm a 6-digit one-time code ema
 Setup
 backend/.env: GROQ_API_KEY, and for email delivery SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM. With no SMTP_HOST and OTP_CONSOLE_FALLBACK=true (development only) the code is printed in the backend log instead.
 frontend/.env.local: NEXTAUTH_SECRET (long random string), NEXTAUTH_URL=http://localhost:3000, BACKEND_URL=http://localhost:8000
+
+Database
+MongoDB. Set MONGODB_URI in backend/.env (MongoDB Atlas free M0 cluster, mongodb+srv://...); optional MONGODB_DB (default maha_cyber).
+To copy existing local SQLite data: python backend/scripts/migrate_sqlite_to_mongo.py path/to/maha_cyber.db
+
+Deploying on Render
+Create a free MongoDB Atlas M0 cluster (no card), add a database user, and under Network Access allow 0.0.0.0/0 (Render free has no fixed IPs). In Render use New > Blueprint on this repo and paste the connection string as MONGODB_URI with the other prompted secrets.
