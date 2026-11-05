@@ -41,6 +41,53 @@ interface EvidenceItem {
   tags?: string[];
   notes?: string;
   files?: UploadedFile[];
+  itemDescription?: string;
+  exhibitNumber?: string;
+  makeModel?: string;
+  seizureMemoNumber?: string;
+  witnesses?: string;
+  collectedByName?: string;
+  collectedByRank?: string;
+  collectedByBadge?: string;
+  collectedByUnit?: string;
+  examinerRank?: string;
+  examinerLab?: string;
+  examinationDate?: string;
+  toolsUsed?: string;
+  examinationMethod?: string;
+  findings?: string;
+  currentCustodian?: string;
+  storageLocation?: string;
+  custodyTransfers?: CustodyTransfer[];
+  sealed?: boolean;
+  sealNumber?: string;
+  filesCount?: number;
+}
+
+interface CustodyTransfer {
+  fromPerson: string;
+  toPerson: string;
+  date: string;
+  purpose: string;
+}
+
+interface CaseInfo {
+  id: string;
+  title?: string;
+  status?: string;
+  caseType?: string;
+  firNumber?: string;
+  priority?: string;
+  officerName?: string;
+  officerRank?: string;
+  officerBadgeId?: string;
+  officerContact?: string;
+  supervisingOfficer?: string;
+  policeStation?: string;
+  district?: string;
+  state?: string;
+  court?: string;
+  legalSections?: string;
 }
 
 interface Correlation {
@@ -69,11 +116,11 @@ interface GraphNode {
 }
 
 const CATEGORY_CONFIG: Record<EvidenceCategory, { color: string; accent: string; icon: string; label: string }> = {
-  electronic:     { color: "#00d4ff", accent: "#0099bb", icon: "📱", label: "Electronic Device" },
-  document:       { color: "#a78bfa", accent: "#7c3aed", icon: "📄", label: "Physical Document" },
+  electronic:     { color: "#3b82f6", accent: "#2563eb", icon: "📱", label: "Electronic Device" },
+  document:       { color: "#8b5cf6", accent: "#7c3aed", icon: "📄", label: "Physical Document" },
   forensic_image: { color: "#f59e0b", accent: "#d97706", icon: "💾", label: "Forensic Image" },
   photo:          { color: "#10b981", accent: "#059669", icon: "📷", label: "Photograph" },
-  other:          { color: "#6b7280", accent: "#4b5563", icon: "📦", label: "Other / Misc" },
+  other:          { color: "#64748b", accent: "#475569", icon: "📦", label: "Other / Misc" },
 };
 
 const PRIORITY_CONFIG = {
@@ -82,6 +129,41 @@ const PRIORITY_CONFIG = {
   high:     { color: "#ef4444", bg: "#2a1515", label: "High" },
   critical: { color: "#dc2626", bg: "#3b0a0a", label: "CRITICAL" },
 };
+
+const RANKS = ["Police Constable", "Head Constable", "Assistant Sub-Inspector (ASI)", "Sub-Inspector (SI)", "Police Inspector (PI)", "Assistant Commissioner (ACP)", "Deputy Commissioner (DCP)", "Forensic Analyst", "Senior Forensic Expert", "Other"];
+const DEVICE_TYPES = ["Smartphone", "Laptop / PC", "Storage (USB/HDD)", "Networking Equipment", "IoT Device", "Server", "Tablet", "CCTV / Camera", "GPS Device", "Smartwatch"];
+const CONDITIONS = ["Excellent", "Good", "Fair", "Damaged", "Destroyed"];
+
+const EMPTY_EVIDENCE = {
+  category: "electronic" as EvidenceCategory,
+  priority: "medium" as "low" | "medium" | "high" | "critical",
+  itemDescription: "", exhibitNumber: "", deviceType: "Smartphone", makeModel: "", identifyingInfo: "", documentName: "",
+  collectedDate: "", collectedFrom: "", location: "", seizureMemoNumber: "", witnesses: "",
+  collectedByName: "", collectedByRank: "", collectedByBadge: "", collectedByUnit: "",
+  examiner: "", examinerRank: "", examinerLab: "", examinationDate: "", toolsUsed: "", examinationMethod: "", findings: "",
+  chainOfCustodyNumber: "", currentCustodian: "", storageLocation: "",
+  hashMD5: "", hashSHA256: "", condition: "Good", sealed: false, sealNumber: "",
+  notes: "",
+};
+
+const NODE_W = 172;
+const NODE_H = 62;
+
+// Point where the line from a node centre toward (tx,ty) leaves the node's rectangle.
+function clipToRect(cx: number, cy: number, tx: number, ty: number) {
+  const dx = tx - cx;
+  const dy = ty - cy;
+  if (!dx && !dy) return { x: cx, y: cy };
+  const s = Math.min((NODE_W / 2 + 2) / (Math.abs(dx) || 1e-9), (NODE_H / 2 + 2) / (Math.abs(dy) || 1e-9));
+  return { x: cx + dx * s, y: cy + dy * s };
+}
+
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+  return t + "…";
+}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function EvidencePage() {
@@ -96,26 +178,19 @@ export default function EvidencePage() {
   const [showGraphView, setShowGraphView] = useState(false);
   const [showCorrelationModal, setShowCorrelationModal] = useState(false);
   const [activeTab, setActiveTab] = useState<"timeline" | "graph">("timeline");
-  const [showFormSection, setShowFormSection] = useState<string[]>(["basic", "device", "forensic", "notes"]);
+  const [showEvidenceForm, setShowEvidenceForm] = useState(false);
+  const [caseInfo, setCaseInfo] = useState<CaseInfo | null>(null);
 
-  // Form state
-  const [category, setCategory] = useState<EvidenceCategory>("electronic");
-  const [collectedDate, setCollectedDate] = useState("");
-  const [collectedFrom, setCollectedFrom] = useState("");
-  const [location, setLocation] = useState("");
-  const [documentName, setDocumentName] = useState("");
-  const [deviceType, setDeviceType] = useState("Smartphone");
-  const [identifyingInfo, setIdentifyingInfo] = useState("");
-  const [chainOfCustodyNumber, setChainOfCustodyNumber] = useState("");
-  const [examiner, setExaminer] = useState("");
-  const [hashMD5, setHashMD5] = useState("");
-  const [hashSHA256, setHashSHA256] = useState("");
-  const [condition, setCondition] = useState("Good");
-  const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">("medium");
+  // Evidence form state
+  const [form, setForm] = useState({ ...EMPTY_EVIDENCE });
+  const setField = (k: keyof typeof EMPTY_EVIDENCE) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+      setForm(p => ({ ...p, [k]: e.target.value }));
+  const [custodyTransfers, setCustodyTransfers] = useState<CustodyTransfer[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
-  const [notes, setNotes] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const category = form.category;
 
   // AI correlation state
   const [showAiModal, setShowAiModal] = useState(false);
@@ -138,6 +213,9 @@ export default function EvidencePage() {
   const isPanningRef = useRef(false);
   const lastPanPosRef = useRef({ x: 0, y: 0 });
   const hoveredNodeRef = useRef<GraphNode | null>(null);
+  const alphaRef = useRef(1);
+  const selectedRef = useRef<EvidenceItem | null>(null);
+  const downPosRef = useRef({ x: 0, y: 0 });
 
   // ─── Data fetching ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -145,7 +223,9 @@ export default function EvidencePage() {
     Promise.all([
       fetch(`/backend/api/cases/${caseId}/evidence`).then(r => r.ok ? r.json() : []),
       fetch(`/backend/api/cases/${caseId}/correlations`).then(r => r.ok ? r.json() : []),
-    ]).then(([evData, corrData]) => {
+      fetch(`/backend/api/cases/${caseId}`).then(r => r.ok ? r.json() : null),
+    ]).then(([evData, corrData, caseData]) => {
+      setCaseInfo(caseData);
       setEvidenceList(evData);
       setCorrelations(corrData);
     }).finally(() => setIsLoading(false));
@@ -157,9 +237,10 @@ export default function EvidencePage() {
     if (!canvas) return;
     const w = canvas.width;
     const h = canvas.height;
+    const n = evidenceList.length;
+    const radius = Math.max(Math.min(w, h) * 0.32, n > 1 ? 150 + n * 14 : 0);
     graphNodesRef.current = evidenceList.map((item, i) => {
-      const angle = (i / evidenceList.length) * Math.PI * 2 - Math.PI / 2;
-      const radius = Math.min(w, h) * 0.3;
+      const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
       return {
         id: item.id,
         x: w / 2 + radius * Math.cos(angle),
@@ -169,6 +250,7 @@ export default function EvidencePage() {
         item,
       };
     });
+    alphaRef.current = 1;
   }, [evidenceList]);
 
   const drawGraph = useCallback(() => {
@@ -177,23 +259,18 @@ export default function EvidencePage() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const { scale, panX, panY } = transformRef.current;
+    const selectedId = selectedRef.current?.id;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Background grid
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.04)";
-    ctx.lineWidth = 1;
-    const gridSize = 40 * scale;
+    // Background + dot grid
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const gridSize = 24 * scale;
     const offsetX = ((panX % gridSize) + gridSize) % gridSize;
     const offsetY = ((panY % gridSize) + gridSize) % gridSize;
+    ctx.fillStyle = "rgba(148,163,184,0.14)";
     for (let x = offsetX; x < canvas.width; x += gridSize) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      for (let y = offsetY; y < canvas.height; y += gridSize) ctx.fillRect(x, y, 1.5, 1.5);
     }
-    for (let y = offsetY; y < canvas.height; y += gridSize) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-    }
-    ctx.restore();
 
     ctx.save();
     ctx.translate(panX, panY);
@@ -203,188 +280,184 @@ export default function EvidencePage() {
     const nodeMap: Record<string, GraphNode> = {};
     nodes.forEach(n => { nodeMap[n.id] = n; });
 
-    // Draw edges
+    // ── Edges ──
     correlations.forEach(corr => {
       const from = nodeMap[corr.from];
       const to = nodeMap[corr.to];
       if (!from || !to) return;
+      const active = selectedId === from.id || selectedId === to.id;
+      const color = active ? "#cbd5e1" : "#475569";
 
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      const nx = dx / dist;
-      const ny = dy / dist;
-      const nodeR = 36;
-
-      const sx = from.x + nx * nodeR;
-      const sy = from.y + ny * nodeR;
-      const ex = to.x - nx * nodeR;
-      const ey = to.y - ny * nodeR;
-
-      // Glowing edge
-      const grad = ctx.createLinearGradient(sx, sy, ex, ey);
-      grad.addColorStop(0, "rgba(99,179,237,0.8)");
-      grad.addColorStop(1, "rgba(159,122,234,0.8)");
+      const a = clipToRect(from.x, from.y, to.x, to.y);
+      const b = clipToRect(to.x, to.y, from.x, from.y);
 
       ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(ex, ey);
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = 2;
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = "#63b3ed";
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = active ? 1.75 : 1.25;
       ctx.stroke();
-      ctx.shadowBlur = 0;
 
       // Arrowhead
-      const angle = Math.atan2(dy, dx);
+      const angle = Math.atan2(b.y - a.y, b.x - a.x);
       ctx.beginPath();
-      ctx.moveTo(ex, ey);
-      ctx.lineTo(ex - 12 * Math.cos(angle - 0.4), ey - 12 * Math.sin(angle - 0.4));
-      ctx.lineTo(ex - 12 * Math.cos(angle + 0.4), ey - 12 * Math.sin(angle + 0.4));
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - 9 * Math.cos(angle - 0.4), b.y - 9 * Math.sin(angle - 0.4));
+      ctx.lineTo(b.x - 9 * Math.cos(angle + 0.4), b.y - 9 * Math.sin(angle + 0.4));
       ctx.closePath();
-      ctx.fillStyle = "#63b3ed";
+      ctx.fillStyle = color;
       ctx.fill();
 
-      // Label pill
-      const midX = (sx + ex) / 2;
-      const midY = (sy + ey) / 2;
-      const labelW = ctx.measureText(corr.relationshipType).width + 16;
-      ctx.fillStyle = "rgba(15,23,42,0.9)";
+      // Label
+      ctx.font = "500 10px Inter, system-ui, sans-serif";
+      const text = corr.relationshipType;
+      const labelW = ctx.measureText(text).width + 14;
+      const midX = (a.x + b.x) / 2;
+      const midY = (a.y + b.y) / 2;
       ctx.beginPath();
-      ctx.roundRect(midX - labelW / 2, midY - 10, labelW, 20, 10);
+      ctx.roundRect(midX - labelW / 2, midY - 9, labelW, 18, 4);
+      ctx.fillStyle = "#0b1220";
       ctx.fill();
-      ctx.strokeStyle = "rgba(99,179,237,0.4)";
+      ctx.strokeStyle = active ? "#64748b" : "#334155";
       ctx.lineWidth = 1;
       ctx.stroke();
-      ctx.fillStyle = "#93c5fd";
-      ctx.font = "11px 'JetBrains Mono', monospace";
+      ctx.fillStyle = active ? "#e2e8f0" : "#94a3b8";
       ctx.textAlign = "center";
-      ctx.fillText(corr.relationshipType, midX, midY + 4);
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, midX, midY + 0.5);
     });
 
-    // Draw nodes
+    // ── Nodes (flat cards) ──
     nodes.forEach(node => {
-      const cfg = CATEGORY_CONFIG[node.item.category];
+      const cfg = CATEGORY_CONFIG[node.item.category] || CATEGORY_CONFIG.other;
       const isHovered = hoveredNodeRef.current?.id === node.id;
-      const isSelected = selectedEvidence?.id === node.id;
-      const r = isHovered || isSelected ? 42 : 36;
+      const isSelected = selectedId === node.id;
+      const x = node.x - NODE_W / 2;
+      const y = node.y - NODE_H / 2;
 
-      // Outer glow
-      const glow = ctx.createRadialGradient(node.x, node.y, r * 0.5, node.x, node.y, r * 2);
-      glow.addColorStop(0, cfg.color + "33");
-      glow.addColorStop(1, "transparent");
+      // Card
       ctx.beginPath();
-      ctx.arc(node.x, node.y, r * 2, 0, Math.PI * 2);
-      ctx.fillStyle = glow;
+      ctx.roundRect(x, y, NODE_W, NODE_H, 6);
+      ctx.fillStyle = isSelected ? "#1a2942" : isHovered ? "#16223a" : "#111b2e";
       ctx.fill();
-
-      // Node body
-      const bodyGrad = ctx.createRadialGradient(node.x - r * 0.3, node.y - r * 0.3, 0, node.x, node.y, r);
-      bodyGrad.addColorStop(0, cfg.color + "ee");
-      bodyGrad.addColorStop(1, cfg.accent + "cc");
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = bodyGrad;
-      ctx.shadowBlur = isSelected ? 20 : 10;
-      ctx.shadowColor = cfg.color;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      // Border
-      ctx.strokeStyle = isSelected ? "#ffffff" : cfg.color;
-      ctx.lineWidth = isSelected ? 3 : 2;
+      ctx.strokeStyle = isSelected ? cfg.color : isHovered ? "#475569" : "#243247";
+      ctx.lineWidth = isSelected ? 1.5 : 1;
       ctx.stroke();
 
-      // Priority ring
-      if (node.item.priority && node.item.priority !== "low") {
-        const pCfg = PRIORITY_CONFIG[node.item.priority];
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, r + 6, -Math.PI / 2, Math.PI * 1.5);
-        ctx.strokeStyle = pCfg.color;
-        ctx.lineWidth = 3;
-        ctx.setLineDash([6, 4]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      // Icon
-      ctx.font = `${r * 0.55}px serif`;
-      ctx.textAlign = "center";
-      ctx.fillStyle = "#fff";
-      ctx.fillText(cfg.icon, node.x, node.y - 4);
-
-      // ID label
-      ctx.font = "bold 10px 'JetBrains Mono', monospace";
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(node.id, node.x, node.y + r + 16);
-
-      // Device type / name
-      const label = node.item.deviceType || node.item.documentName || node.item.category;
-      ctx.font = "10px sans-serif";
+      // Category colour bar
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x, y, NODE_W, NODE_H, 6);
+      ctx.clip();
       ctx.fillStyle = cfg.color;
-      ctx.fillText(label.length > 14 ? label.slice(0, 13) + "…" : label, node.x, node.y + r + 28);
+      ctx.fillRect(x, y, 4, NODE_H);
+      ctx.restore();
+
+      const tx = x + 14;
+      ctx.textBaseline = "alphabetic";
+      ctx.textAlign = "left";
+
+      // Category label
+      ctx.font = "600 9px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#64748b";
+      ctx.fillText(cfg.label.toUpperCase(), tx, y + 19);
+
+      // ID (right)
+      ctx.font = "600 10px 'JetBrains Mono', monospace";
+      ctx.fillStyle = "#94a3b8";
+      ctx.textAlign = "right";
+      ctx.fillText(node.id, x + NODE_W - 10, y + 19);
+
+      // Title
+      ctx.textAlign = "left";
+      ctx.font = "600 12px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "#e2e8f0";
+      const label = node.item.deviceType || node.item.documentName || cfg.label;
+      ctx.fillText(fitText(ctx, label, NODE_W - 28), tx, y + 38);
+
+      // Priority badge
+      const pr = node.item.priority;
+      if (pr && pr !== "low") {
+        const pCfg = PRIORITY_CONFIG[pr];
+        ctx.beginPath();
+        ctx.arc(tx + 3, y + 51, 3, 0, Math.PI * 2);
+        ctx.fillStyle = pCfg.color;
+        ctx.fill();
+        ctx.font = "600 9px Inter, system-ui, sans-serif";
+        ctx.fillStyle = pCfg.color;
+        ctx.fillText(pCfg.label.toUpperCase(), tx + 11, y + 54);
+      }
     });
 
     ctx.restore();
-  }, [correlations, selectedEvidence]);
+  }, [correlations]);
 
-  // Physics simulation
+  // Force layout: runs only until the nodes settle, then the graph stays still.
   const runSimulation = useCallback(() => {
     const nodes = graphNodesRef.current;
     const canvas = canvasRef.current;
     if (!canvas || nodes.length === 0) return;
 
-    // Repulsion
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const dx = nodes[j].x - nodes[i].x;
-        const dy = nodes[j].y - nodes[i].y;
-        const dist = Math.hypot(dx, dy) || 1;
-        const force = Math.min(8000 / (dist * dist), 5);
-        nodes[i].vx -= (dx / dist) * force;
-        nodes[i].vy -= (dy / dist) * force;
-        nodes[j].vx += (dx / dist) * force;
-        nodes[j].vy += (dy / dist) * force;
+    const alpha = alphaRef.current;
+    if (alpha > 0.03) {
+      // Repulsion + overlap avoidance
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const dx = nodes[j].x - nodes[i].x;
+          const dy = nodes[j].y - nodes[i].y;
+          const dist = Math.hypot(dx, dy) || 1;
+          let force = Math.min(60000 / (dist * dist), 3) * alpha;
+          if (Math.abs(dx) < NODE_W + 30 && Math.abs(dy) < NODE_H + 30) force += 2;
+          nodes[i].vx -= (dx / dist) * force;
+          nodes[i].vy -= (dy / dist) * force;
+          nodes[j].vx += (dx / dist) * force;
+          nodes[j].vy += (dy / dist) * force;
+        }
       }
+
+      // Spring along edges
+      correlations.forEach(corr => {
+        const from = nodes.find(n => n.id === corr.from);
+        const to = nodes.find(n => n.id === corr.to);
+        if (!from || !to) return;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const force = (dist - 280) * 0.01 * alpha;
+        from.vx += (dx / dist) * force;
+        from.vy += (dy / dist) * force;
+        to.vx -= (dx / dist) * force;
+        to.vy -= (dy / dist) * force;
+      });
+
+      // Gentle pull to centre
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      nodes.forEach(n => {
+        n.vx += (cx - n.x) * 0.0015 * alpha;
+        n.vy += (cy - n.y) * 0.0015 * alpha;
+      });
+
+      // Heavy damping, capped speed, integrate (dragged node stays put)
+      nodes.forEach(n => {
+        if (isDraggingRef.current.node?.id === n.id) return;
+        n.vx *= 0.55;
+        n.vy *= 0.55;
+        const sp = Math.hypot(n.vx, n.vy);
+        if (sp > 10) { n.vx = (n.vx / sp) * 10; n.vy = (n.vy / sp) * 10; }
+        n.x += n.vx;
+        n.y += n.vy;
+      });
+      alphaRef.current = alpha * 0.97;
     }
-
-    // Attraction along edges
-    correlations.forEach(corr => {
-      const from = nodes.find(n => n.id === corr.from);
-      const to = nodes.find(n => n.id === corr.to);
-      if (!from || !to) return;
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      const targetDist = 180;
-      const force = (dist - targetDist) * 0.003;
-      from.vx += (dx / dist) * force;
-      from.vy += (dy / dist) * force;
-      to.vx -= (dx / dist) * force;
-      to.vy -= (dy / dist) * force;
-    });
-
-    // Center gravity
-    const cx = canvas.width / 2;
-    const cy = canvas.height / 2;
-    nodes.forEach(n => {
-      n.vx += (cx - n.x) * 0.001;
-      n.vy += (cy - n.y) * 0.001;
-    });
-
-    // Damping & integrate (skip dragged node)
-    nodes.forEach(n => {
-      if (isDraggingRef.current.node?.id === n.id) return;
-      n.vx *= 0.85;
-      n.vy *= 0.85;
-      n.x += n.vx;
-      n.y += n.vy;
-    });
 
     drawGraph();
     animFrameRef.current = requestAnimationFrame(runSimulation);
   }, [correlations, drawGraph]);
+
+  useEffect(() => {
+    selectedRef.current = selectedEvidence;
+  }, [selectedEvidence]);
 
   useEffect(() => {
     if (activeTab === "graph" && evidenceList.length > 0) {
@@ -399,6 +472,28 @@ export default function EvidencePage() {
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [activeTab, evidenceList, correlations, initGraphNodes, runSimulation]);
 
+  // Non-passive wheel listener so zooming doesn't scroll the page
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (activeTab !== "graph" || !canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 0.9;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const { scale, panX, panY } = transformRef.current;
+      const newScale = Math.max(0.3, Math.min(3, scale * factor));
+      transformRef.current = {
+        scale: newScale,
+        panX: mouseX - (mouseX - panX) * (newScale / scale),
+        panY: mouseY - (mouseY - panY) * (newScale / scale),
+      };
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, [activeTab, evidenceList.length]);
+
   // ─── Canvas mouse events ───────────────────────────────────────────────────
   const getCanvasPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!;
@@ -411,11 +506,12 @@ export default function EvidencePage() {
   };
 
   const findNodeAt = (x: number, y: number) =>
-    graphNodesRef.current.find(n => Math.hypot(n.x - x, n.y - y) < 42);
+    [...graphNodesRef.current].reverse().find(n => Math.abs(n.x - x) <= NODE_W / 2 && Math.abs(n.y - y) <= NODE_H / 2);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getCanvasPos(e);
     const node = findNodeAt(pos.x, pos.y);
+    downPosRef.current = { x: e.clientX, y: e.clientY };
     if (node) {
       isDraggingRef.current = { node, offsetX: pos.x - node.x, offsetY: pos.y - node.y };
     } else {
@@ -434,24 +530,21 @@ export default function EvidencePage() {
       isDraggingRef.current.node.y = pos.y - isDraggingRef.current.offsetY;
       isDraggingRef.current.node.vx = 0;
       isDraggingRef.current.node.vy = 0;
+      alphaRef.current = Math.max(alphaRef.current, 0.25); // let neighbours ease aside
     } else if (isPanningRef.current) {
-      const dx = e.clientX - lastPanPosRef.current.x;
-      const dy = e.clientY - lastPanPosRef.current.y;
-      transformRef.current.panX += dx;
-      transformRef.current.panY += dy;
+      transformRef.current.panX += e.clientX - lastPanPosRef.current.x;
+      transformRef.current.panY += e.clientY - lastPanPosRef.current.y;
       lastPanPosRef.current = { x: e.clientX, y: e.clientY };
     }
 
     if (canvasRef.current) {
-      canvasRef.current.style.cursor = node ? "grab" : isPanningRef.current ? "grabbing" : "default";
+      canvasRef.current.style.cursor = isDraggingRef.current.node || isPanningRef.current ? "grabbing" : node ? "pointer" : "default";
     }
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const wasClick = !isDraggingRef.current.node || (
-      Math.abs(isDraggingRef.current.node.vx) < 1 && Math.abs(isDraggingRef.current.node.vy) < 1
-    );
-    if (wasClick && !isPanningRef.current) {
+    const moved = Math.hypot(e.clientX - downPosRef.current.x, e.clientY - downPosRef.current.y);
+    if (moved < 4 && e.type === "mouseup") {
       const pos = getCanvasPos(e);
       const node = findNodeAt(pos.x, pos.y);
       if (node) setSelectedEvidence(node.item);
@@ -460,20 +553,8 @@ export default function EvidencePage() {
     isPanningRef.current = false;
   };
 
-  const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    const { scale, panX, panY } = transformRef.current;
-    const newScale = Math.max(0.3, Math.min(3, scale * factor));
-    transformRef.current = {
-      scale: newScale,
-      panX: mouseX - (mouseX - panX) * (newScale / scale),
-      panY: mouseY - (mouseY - panY) * (newScale / scale),
-    };
+  const zoomBy = (f: number) => {
+    transformRef.current.scale = Math.max(0.3, Math.min(3, transformRef.current.scale * f));
   };
 
   const resetGraphView = () => {
@@ -521,18 +602,35 @@ export default function EvidencePage() {
     setTagInput("");
   };
 
+  // ─── Custody transfers ─────────────────────────────────────────────────────
+  const addTransfer = () =>
+    setCustodyTransfers(prev => [...prev, { fromPerson: "", toPerson: "", date: "", purpose: "" }]);
+  const updateTransfer = (i: number, k: keyof CustodyTransfer, v: string) =>
+    setCustodyTransfers(prev => prev.map((t, idx) => (idx === i ? { ...t, [k]: v } : t)));
+  const removeTransfer = (i: number) =>
+    setCustodyTransfers(prev => prev.filter((_, idx) => idx !== i));
+
+  const resetEvidenceForm = () => {
+    setForm({ ...EMPTY_EVIDENCE });
+    setCustodyTransfers([]);
+    setTags([]); setTagInput("");
+    uploadedFiles.forEach(f => URL.revokeObjectURL(f.url));
+    setUploadedFiles([]);
+  };
+
   // ─── Submit ────────────────────────────────────────────────────────────────
   const handleAddEvidence = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
 
     const payload = {
-      category, collectedDate, collectedFrom, location,
-      documentName: category === "document" ? documentName : undefined,
-      deviceType: category === "electronic" ? deviceType : undefined,
-      identifyingInfo: ["electronic", "forensic_image"].includes(category) ? identifyingInfo : undefined,
-      chainOfCustodyNumber, examiner, hashMD5, hashSHA256,
-      condition, priority, tags, notes,
+      ...form,
+      documentName: category === "document" ? form.documentName : undefined,
+      deviceType: category === "electronic" ? form.deviceType : undefined,
+      makeModel: category === "electronic" ? form.makeModel : undefined,
+      identifyingInfo: ["electronic", "forensic_image"].includes(category) ? form.identifyingInfo : undefined,
+      custodyTransfers: custodyTransfers.filter(t => t.fromPerson || t.toPerson),
+      tags,
       filesCount: uploadedFiles.length,
     };
 
@@ -545,12 +643,8 @@ export default function EvidencePage() {
       if (res.ok) {
         const updated = await fetch(`/backend/api/cases/${caseId}/evidence`);
         if (updated.ok) setEvidenceList(await updated.json());
-        // Reset
-        setCollectedDate(""); setCollectedFrom(""); setLocation("");
-        setDocumentName(""); setIdentifyingInfo(""); setChainOfCustodyNumber("");
-        setExaminer(""); setHashMD5(""); setHashSHA256("");
-        setTags([]); setTagInput(""); setNotes(""); setUploadedFiles([]);
-        setPriority("medium"); setCondition("Good");
+        resetEvidenceForm();
+        setShowEvidenceForm(false);
       } else {
         alert("Failed to save evidence.");
       }
@@ -617,9 +711,6 @@ export default function EvidencePage() {
     }
   };
 
-  const toggleSection = (s: string) =>
-    setShowFormSection(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
-
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div
@@ -649,11 +740,28 @@ export default function EvidencePage() {
                 {evidenceList.length} items
               </span>
             </div>
-            <h1 className="text-xl font-bold tracking-tight" style={{ color: "#e2e8f0" }}>{caseId}</h1>
+            <h1 className="text-xl font-bold tracking-tight" style={{ color: "#e2e8f0" }}>
+              {caseId}{caseInfo?.title ? <span className="font-normal" style={{ color: "#94a3b8" }}> — {caseInfo.title}</span> : null}
+            </h1>
+            {caseInfo && (caseInfo.officerName || caseInfo.policeStation) && (
+              <p className="text-xs mt-1" style={{ color: "#64748b" }}>
+                {caseInfo.officerName && <>IO: <span style={{ color: "#94a3b8" }}>{[caseInfo.officerRank?.replace(/ \(.*\)/, ""), caseInfo.officerName].filter(Boolean).join(" ")}{caseInfo.officerBadgeId ? ` (${caseInfo.officerBadgeId})` : ""}</span></>}
+                {caseInfo.policeStation && <> &nbsp;•&nbsp; PS: <span style={{ color: "#94a3b8" }}>{caseInfo.policeStation}</span></>}
+                {caseInfo.district && <> &nbsp;•&nbsp; <span style={{ color: "#94a3b8" }}>{caseInfo.district}{caseInfo.state ? `, ${caseInfo.state}` : ""}</span></>}
+                {caseInfo.firNumber && <> &nbsp;•&nbsp; FIR: <span style={{ color: "#94a3b8" }}>{caseInfo.firNumber}</span></>}
+              </p>
+            )}
           </div>
         </div>
 
         <div className="flex gap-3">
+          <button
+            onClick={() => setShowEvidenceForm(true)}
+            className="px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all"
+            style={{ background: "#2563eb", border: "1px solid #3b82f6", color: "#fff" }}
+          >
+            <Plus className="w-4 h-4" /> Add Evidence
+          </button>
           <button
             onClick={() => setShowCorrelationModal(true)}
             disabled={evidenceList.length < 2}
@@ -682,236 +790,6 @@ export default function EvidencePage() {
       </div>
 
       <div className="flex gap-0" style={{ minHeight: "calc(100vh - 73px)" }}>
-        {/* ── LEFT: FORM PANEL ── */}
-        <div
-          className="w-96 shrink-0 overflow-y-auto"
-          style={{
-            borderRight: "1px solid rgba(99,179,237,0.1)",
-            background: "rgba(10,15,26,0.6)",
-          }}
-        >
-          <div className="p-5">
-            <h2 className="text-sm font-bold mb-4 flex items-center gap-2" style={{ color: "#94a3b8", letterSpacing: "0.1em" }}>
-              <Plus className="w-4 h-4" style={{ color: "#63b3ed" }} />
-              LOG NEW EVIDENCE
-            </h2>
-
-            <form onSubmit={handleAddEvidence} className="space-y-3">
-              {/* Category + Priority row */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs mb-1" style={{ color: "#64748b" }}>CATEGORY</label>
-                  <select
-                    value={category}
-                    onChange={e => setCategory(e.target.value as EvidenceCategory)}
-                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                    style={{ background: "rgba(30,41,59,0.8)", border: "1px solid rgba(99,179,237,0.2)", color: "#e2e8f0" }}
-                  >
-                    {Object.entries(CATEGORY_CONFIG).map(([k, v]) => (
-                      <option key={k} value={k}>{v.icon} {v.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs mb-1" style={{ color: "#64748b" }}>PRIORITY</label>
-                  <select
-                    value={priority}
-                    onChange={e => setPriority(e.target.value as typeof priority)}
-                    className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                    style={{
-                      background: PRIORITY_CONFIG[priority].bg,
-                      border: `1px solid ${PRIORITY_CONFIG[priority].color}66`,
-                      color: PRIORITY_CONFIG[priority].color,
-                    }}
-                  >
-                    {Object.entries(PRIORITY_CONFIG).map(([k, v]) => (
-                      <option key={k} value={k}>{v.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* ─ Section: Basic ─ */}
-              <SectionToggle label="BASIC DETAILS" id="basic" open={showFormSection.includes("basic")} toggle={toggleSection} />
-              {showFormSection.includes("basic") && (
-                <div className="space-y-2 pl-3" style={{ borderLeft: "2px solid rgba(99,179,237,0.15)" }}>
-                  {category === "document" && (
-                    <FormField label="Document Name" icon={<FileText className="w-3.5 h-3.5" />}>
-                      <input required placeholder="Bank Statement, Contract…" value={documentName} onChange={e => setDocumentName(e.target.value)} className={inputClass} style={inputStyle} />
-                    </FormField>
-                  )}
-                  {category === "electronic" && (
-                    <FormField label="Device Type" icon={<Smartphone className="w-3.5 h-3.5" />}>
-                      <select value={deviceType} onChange={e => setDeviceType(e.target.value)} className={inputClass} style={inputStyle}>
-                        <option>Smartphone</option>
-                        <option>Laptop / PC</option>
-                        <option>Storage (USB/HDD)</option>
-                        <option>Networking Equipment</option>
-                        <option>IoT Device</option>
-                        <option>Server</option>
-                        <option>Tablet</option>
-                        <option>CCTV / Camera</option>
-                        <option>GPS Device</option>
-                        <option>Smartwatch</option>
-                      </select>
-                    </FormField>
-                  )}
-                  {["electronic", "forensic_image"].includes(category) && (
-                    <FormField label="Identifiers (IMEI/MAC/Serial/Hash)" icon={<Fingerprint className="w-3.5 h-3.5" />}>
-                      <input placeholder="IMEI: 358919…" value={identifyingInfo} onChange={e => setIdentifyingInfo(e.target.value)} className={inputClass} style={inputStyle} />
-                    </FormField>
-                  )}
-                  <FormField label="Date Collected" icon={<Calendar className="w-3.5 h-3.5" />}>
-                    <input required type="date" value={collectedDate} onChange={e => setCollectedDate(e.target.value)} className={inputClass} style={inputStyle} />
-                  </FormField>
-                  <FormField label="Collected From" icon={<User className="w-3.5 h-3.5" />}>
-                    <input required placeholder="John Doe (Suspect)" value={collectedFrom} onChange={e => setCollectedFrom(e.target.value)} className={inputClass} style={inputStyle} />
-                  </FormField>
-                  <FormField label="Seizure Location" icon={<MapPin className="w-3.5 h-3.5" />}>
-                    <input required placeholder="Flat 4B, Building A…" value={location} onChange={e => setLocation(e.target.value)} className={inputClass} style={inputStyle} />
-                  </FormField>
-                  <FormField label="Physical Condition" icon={<AlertTriangle className="w-3.5 h-3.5" />}>
-                    <select value={condition} onChange={e => setCondition(e.target.value)} className={inputClass} style={inputStyle}>
-                      <option>Excellent</option>
-                      <option>Good</option>
-                      <option>Fair</option>
-                      <option>Damaged</option>
-                      <option>Destroyed</option>
-                    </select>
-                  </FormField>
-                </div>
-              )}
-
-              {/* ─ Section: Chain of Custody ─ */}
-              <SectionToggle label="CHAIN OF CUSTODY" id="custody" open={showFormSection.includes("custody")} toggle={toggleSection} />
-              {showFormSection.includes("custody") && (
-                <div className="space-y-2 pl-3" style={{ borderLeft: "2px solid rgba(168,85,247,0.2)" }}>
-                  <FormField label="CoC Number" icon={<Hash className="w-3.5 h-3.5" />}>
-                    <input placeholder="CoC-2026-001" value={chainOfCustodyNumber} onChange={e => setChainOfCustodyNumber(e.target.value)} className={inputClass} style={inputStyle} />
-                  </FormField>
-                  <FormField label="Examiner / Officer" icon={<User className="w-3.5 h-3.5" />}>
-                    <input placeholder="Inspector Singh" value={examiner} onChange={e => setExaminer(e.target.value)} className={inputClass} style={inputStyle} />
-                  </FormField>
-                </div>
-              )}
-
-              {/* ─ Section: Forensic Hashes ─ */}
-              <SectionToggle label="FORENSIC INTEGRITY" id="forensic" open={showFormSection.includes("forensic")} toggle={toggleSection} />
-              {showFormSection.includes("forensic") && (
-                <div className="space-y-2 pl-3" style={{ borderLeft: "2px solid rgba(245,158,11,0.2)" }}>
-                  <FormField label="MD5 Hash" icon={<Database className="w-3.5 h-3.5" />}>
-                    <input placeholder="d41d8cd98f00b204e9800998ecf8427e" value={hashMD5} onChange={e => setHashMD5(e.target.value)} className={inputClass} style={{ ...inputStyle, fontFamily: "monospace", fontSize: "11px" }} />
-                  </FormField>
-                  <FormField label="SHA-256 Hash" icon={<Database className="w-3.5 h-3.5" />}>
-                    <input placeholder="e3b0c44298fc1c149afb…" value={hashSHA256} onChange={e => setHashSHA256(e.target.value)} className={inputClass} style={{ ...inputStyle, fontFamily: "monospace", fontSize: "11px" }} />
-                  </FormField>
-                </div>
-              )}
-
-              {/* ─ Section: Tags & Notes ─ */}
-              <SectionToggle label="TAGS & NOTES" id="notes" open={showFormSection.includes("notes")} toggle={toggleSection} />
-              {showFormSection.includes("notes") && (
-                <div className="space-y-2 pl-3" style={{ borderLeft: "2px solid rgba(16,185,129,0.2)" }}>
-                  <div>
-                    <label className="block text-xs mb-1" style={{ color: "#64748b" }}>TAGS</label>
-                    <div className="flex gap-2 mb-2">
-                      <input
-                        placeholder="ransomware, suspect-a…"
-                        value={tagInput}
-                        onChange={e => setTagInput(e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
-                        className={inputClass + " flex-1"}
-                        style={inputStyle}
-                      />
-                      <button type="button" onClick={addTag} className="px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", color: "#10b981" }}>
-                        Add
-                      </button>
-                    </div>
-                    {tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {tags.map(t => (
-                          <span key={t} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs" style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.25)", color: "#10b981" }}>
-                            <Tag className="w-2.5 h-2.5" />{t}
-                            <button type="button" onClick={() => setTags(p => p.filter(x => x !== t))}>
-                              <X className="w-2.5 h-2.5" />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs mb-1" style={{ color: "#64748b" }}>INVESTIGATOR NOTES</label>
-                    <textarea
-                      rows={3}
-                      placeholder="Additional observations, context…"
-                      value={notes}
-                      onChange={e => setNotes(e.target.value)}
-                      className={inputClass}
-                      style={{ ...inputStyle, resize: "vertical", fontFamily: "sans-serif" }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* ─ File Upload ─ */}
-              <SectionToggle label="FILE ATTACHMENTS" id="files" open={showFormSection.includes("files")} toggle={toggleSection} />
-              {showFormSection.includes("files") && (
-                <div className="space-y-2 pl-3" style={{ borderLeft: "2px solid rgba(139,92,246,0.2)" }}>
-                  <label
-                    className="flex flex-col items-center justify-center gap-2 py-5 rounded-lg cursor-pointer transition-all"
-                    style={{ background: "rgba(139,92,246,0.05)", border: "2px dashed rgba(139,92,246,0.2)" }}
-                  >
-                    <Upload className="w-5 h-5" style={{ color: "#8b5cf6" }} />
-                    <span className="text-xs" style={{ color: "#8b5cf6" }}>
-                      {category === "photo" ? "Drop images here" : category === "forensic_image" ? "Drop forensic images (.E01, .dd, .img…)" : "Drop files here"}
-                    </span>
-                    <span className="text-xs" style={{ color: "#64748b" }}>Accepted: {ACCEPTED_TYPES[category]}</span>
-                    <input type="file" multiple accept={ACCEPTED_TYPES[category]} onChange={handleFileUpload} className="hidden" />
-                  </label>
-                  {uploadedFiles.length > 0 && (
-                    <div className="space-y-1.5">
-                      {uploadedFiles.map((f, i) => (
-                        <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: "rgba(30,41,59,0.6)", border: "1px solid rgba(99,179,237,0.1)" }}>
-                          <div className="flex items-center gap-2 min-w-0">
-                            {f.type.startsWith("image/") ? <Image className="w-3.5 h-3.5 shrink-0" style={{ color: "#10b981" }} /> : <File className="w-3.5 h-3.5 shrink-0" style={{ color: "#63b3ed" }} />}
-                            <span className="text-xs truncate" style={{ color: "#cbd5e1" }}>{f.name}</span>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0 ml-2">
-                            <span className="text-xs" style={{ color: "#64748b" }}>{formatBytes(f.size)}</span>
-                            {f.type.startsWith("image/") && (
-                              <a href={f.url} target="_blank" rel="noreferrer">
-                                <Eye className="w-3.5 h-3.5" style={{ color: "#63b3ed" }} />
-                              </a>
-                            )}
-                            <button type="button" onClick={() => removeFile(i)}>
-                              <Trash2 className="w-3.5 h-3.5" style={{ color: "#ef4444" }} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Submit */}
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="w-full py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all mt-2"
-                style={{
-                  background: isSaving ? "rgba(30,41,59,0.5)" : "linear-gradient(135deg, rgba(99,179,237,0.15), rgba(168,85,247,0.15))",
-                  border: `1px solid ${isSaving ? "rgba(71,85,105,0.3)" : "rgba(99,179,237,0.4)"}`,
-                  color: isSaving ? "#64748b" : "#e2e8f0",
-                }}
-              >
-                {isSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Logging…</> : <><Save className="w-4 h-4" style={{ color: "#63b3ed" }} /> Save to Chain of Custody</>}
-              </button>
-            </form>
-          </div>
-        </div>
-
         {/* ── RIGHT: TABS ── */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Tab bar */}
@@ -950,7 +828,7 @@ export default function EvidencePage() {
               ) : (
                 <div className="relative space-y-4 pl-10">
                   {/* Vertical line */}
-                  <div className="absolute left-4 top-0 bottom-0 w-px" style={{ background: "linear-gradient(to bottom, rgba(99,179,237,0.6), rgba(168,85,247,0.4), transparent)" }} />
+                  <div className="absolute left-4 top-0 bottom-0 w-px" style={{ background: "#243247" }} />
 
                   {evidenceList.map((item, idx) => {
                     const cfg = CATEGORY_CONFIG[item.category] || CATEGORY_CONFIG.other;
@@ -964,7 +842,7 @@ export default function EvidencePage() {
                         {/* Dot */}
                         <div
                           className="absolute -left-7 top-5 w-5 h-5 rounded-full flex items-center justify-center text-xs transition-transform"
-                          style={{ background: cfg.color, boxShadow: `0 0 8px ${cfg.color}88`, transform: "translateX(-50%)" }}
+                          style={{ background: cfg.color, border: "2px solid #0b1220", transform: "translateX(-50%)" }}
                         >
                           <span>{cfg.icon}</span>
                         </div>
@@ -993,7 +871,7 @@ export default function EvidencePage() {
                                 </span>
                               ))}
                             </div>
-                            <time className="text-xs shrink-0" style={{ color: "#475569" }}>{item.collectedDate}</time>
+                            <time className="text-xs shrink-0" style={{ color: "#475569" }}>{item.collectedDate?.replace("T", " ")}</time>
                           </div>
 
                           <h3 className="text-base font-bold mb-3" style={{ color: "#e2e8f0" }}>
@@ -1003,6 +881,7 @@ export default function EvidencePage() {
                           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                             {item.identifyingInfo && <InfoRow label="Identifier" value={item.identifyingInfo} mono />}
                             <InfoRow label="Seized from" value={item.collectedFrom} />
+                            {item.collectedByName && <InfoRow label="Collected by" value={[item.collectedByRank?.replace(/ \(.*\)/, ""), item.collectedByName].filter(Boolean).join(" ")} />}
                             <InfoRow label="Location" value={item.location} />
                             {item.examiner && <InfoRow label="Examiner" value={item.examiner} />}
                             {item.chainOfCustodyNumber && <InfoRow label="CoC #" value={item.chainOfCustodyNumber} mono />}
@@ -1011,6 +890,38 @@ export default function EvidencePage() {
 
                           {selectedEvidence?.id === item.id && (
                             <div className="mt-3 pt-3 space-y-2" style={{ borderTop: "1px solid rgba(99,179,237,0.1)" }}>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
+                                {item.itemDescription && <InfoRow wrap label="Description" value={item.itemDescription} />}
+                                {item.exhibitNumber && <InfoRow wrap label="Exhibit #" value={item.exhibitNumber} mono />}
+                                {item.makeModel && <InfoRow wrap label="Make / model" value={item.makeModel} />}
+                                {item.seizureMemoNumber && <InfoRow wrap label="Seizure memo" value={item.seizureMemoNumber} mono />}
+                                {item.witnesses && <InfoRow wrap label="Witnesses" value={item.witnesses} />}
+                                {item.collectedByName && <InfoRow wrap label="Collector" value={[item.collectedByRank, item.collectedByName, item.collectedByBadge && `(${item.collectedByBadge})`, item.collectedByUnit].filter(Boolean).join(" ")} />}
+                                {item.examiner && <InfoRow wrap label="Examined by" value={[item.examiner, item.examinerRank, item.examinerLab].filter(Boolean).join(", ")} />}
+                                {item.examinationDate && <InfoRow wrap label="Examined on" value={item.examinationDate.replace("T", " ")} />}
+                                {item.toolsUsed && <InfoRow wrap label="Tools" value={item.toolsUsed} />}
+                                {item.examinationMethod && <InfoRow wrap label="Method" value={item.examinationMethod} />}
+                                {item.currentCustodian && <InfoRow wrap label="Custodian" value={item.currentCustodian} />}
+                                {item.storageLocation && <InfoRow wrap label="Storage" value={item.storageLocation} />}
+                                {item.sealed && <InfoRow wrap label="Sealed" value={item.sealNumber ? `Yes — seal ${item.sealNumber}` : "Yes"} />}
+                              </div>
+                              {item.findings && (
+                                <div className="p-3 rounded-lg text-xs" style={{ background: "rgba(148,163,184,0.06)", border: "1px solid #243247", color: "#94a3b8", fontFamily: "sans-serif" }}>
+                                  <span className="font-bold" style={{ color: "#64748b" }}>Findings: </span>{item.findings}
+                                </div>
+                              )}
+                              {item.custodyTransfers && item.custodyTransfers.length > 0 && (
+                                <div className="text-xs">
+                                  <p className="font-bold mb-1" style={{ color: "#64748b" }}>Custody transfers</p>
+                                  <div className="space-y-1">
+                                    {item.custodyTransfers.map((t, i) => (
+                                      <div key={i} className="flex flex-wrap gap-x-3 px-2 py-1 rounded" style={{ background: "rgba(148,163,184,0.06)", color: "#94a3b8" }}>
+                                        <span>{t.date?.replace("T", " ")}</span><span>{t.fromPerson} → {t.toPerson}</span>{t.purpose && <span style={{ color: "#64748b" }}>({t.purpose})</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                               {item.hashMD5 && <InfoRow label="MD5" value={item.hashMD5} mono />}
                               {item.hashSHA256 && <InfoRow label="SHA-256" value={item.hashSHA256} mono />}
                               {item.notes && (
@@ -1047,22 +958,22 @@ export default function EvidencePage() {
                     onMouseMove={handleCanvasMouseMove}
                     onMouseUp={handleCanvasMouseUp}
                     onMouseLeave={handleCanvasMouseUp}
-                    onWheel={handleCanvasWheel}
-                    style={{ display: "block", minHeight: "500px" }}
+                    style={{ display: "block", minHeight: "max(500px, calc(100vh - 150px))" }}
                   />
 
                   {/* Graph controls */}
-                  <div className="absolute top-4 right-4 flex flex-col gap-2">
+                  <div className="absolute top-4 right-4 flex flex-col rounded-lg overflow-hidden" style={{ background: "#111b2e", border: "1px solid #243247" }}>
                     {[
-                      { icon: <ZoomIn className="w-4 h-4" />, action: () => { transformRef.current.scale = Math.min(3, transformRef.current.scale * 1.2); } },
-                      { icon: <ZoomOut className="w-4 h-4" />, action: () => { transformRef.current.scale = Math.max(0.3, transformRef.current.scale / 1.2); } },
-                      { icon: <RotateCcw className="w-4 h-4" />, action: resetGraphView },
+                      { icon: <ZoomIn className="w-4 h-4" />, title: "Zoom in", action: () => zoomBy(1.2) },
+                      { icon: <ZoomOut className="w-4 h-4" />, title: "Zoom out", action: () => zoomBy(1 / 1.2) },
+                      { icon: <Maximize2 className="w-4 h-4" />, title: "Reset view", action: resetGraphView },
                     ].map((btn, i) => (
                       <button
                         key={i}
                         onClick={btn.action}
-                        className="p-2 rounded-lg transition-all"
-                        style={{ background: "rgba(10,15,26,0.9)", border: "1px solid rgba(99,179,237,0.2)", color: "#63b3ed" }}
+                        title={btn.title}
+                        className="p-2.5 transition-colors hover:bg-white/5"
+                        style={{ color: "#94a3b8", borderTop: i ? "1px solid #243247" : "none" }}
                       >
                         {btn.icon}
                       </button>
@@ -1070,12 +981,12 @@ export default function EvidencePage() {
                   </div>
 
                   {/* Legend */}
-                  <div className="absolute bottom-4 left-4 p-3 rounded-xl text-xs space-y-1.5" style={{ background: "rgba(10,15,26,0.9)", border: "1px solid rgba(99,179,237,0.15)" }}>
-                    <p className="font-bold mb-2" style={{ color: "#475569", letterSpacing: "0.08em" }}>LEGEND</p>
+                  <div className="absolute bottom-4 left-4 px-3 py-2.5 rounded-lg text-xs space-y-1.5" style={{ background: "#111b2e", border: "1px solid #243247" }}>
+                    <p className="font-semibold" style={{ color: "#64748b", letterSpacing: "0.08em", fontSize: "10px" }}>EVIDENCE TYPE</p>
                     {Object.entries(CATEGORY_CONFIG).map(([k, v]) => (
                       <div key={k} className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full" style={{ background: v.color }} />
-                        <span style={{ color: "#64748b" }}>{v.label}</span>
+                        <div className="w-2.5 h-2.5 rounded-sm" style={{ background: v.color }} />
+                        <span style={{ color: "#94a3b8" }}>{v.label}</span>
                       </div>
                     ))}
                   </div>
@@ -1083,24 +994,26 @@ export default function EvidencePage() {
                   {/* Selected node details */}
                   {selectedEvidence && (
                     <div
-                      className="absolute top-4 left-4 w-64 p-4 rounded-xl space-y-2"
-                      style={{ background: "rgba(10,15,26,0.95)", border: "1px solid rgba(99,179,237,0.25)", backdropFilter: "blur(10px)" }}
+                      className="absolute top-4 left-4 w-72 p-4 rounded-lg space-y-2"
+                      style={{ background: "#111b2e", border: "1px solid #243247" }}
                     >
                       <div className="flex justify-between items-start">
-                        <span className="text-xs font-bold" style={{ color: CATEGORY_CONFIG[selectedEvidence.category]?.color || "#63b3ed" }}>
+                        <span className="text-xs font-bold" style={{ color: CATEGORY_CONFIG[selectedEvidence.category]?.color || "#94a3b8" }}>
                           {selectedEvidence.id}
                         </span>
                         <button onClick={() => setSelectedEvidence(null)}>
-                          <X className="w-4 h-4" style={{ color: "#475569" }} />
+                          <X className="w-4 h-4" style={{ color: "#64748b" }} />
                         </button>
                       </div>
-                      <p className="font-bold text-sm" style={{ color: "#e2e8f0" }}>
+                      <p className="font-semibold text-sm" style={{ color: "#e2e8f0" }}>
                         {selectedEvidence.deviceType || selectedEvidence.documentName || selectedEvidence.category}
                       </p>
                       <div className="text-xs space-y-1" style={{ color: "#64748b" }}>
-                        <p>From: <span style={{ color: "#94a3b8" }}>{selectedEvidence.collectedFrom}</span></p>
+                        <p>Seized from: <span style={{ color: "#94a3b8" }}>{selectedEvidence.collectedFrom}</span></p>
                         <p>Location: <span style={{ color: "#94a3b8" }}>{selectedEvidence.location}</span></p>
-                        <p>Date: <span style={{ color: "#94a3b8" }}>{selectedEvidence.collectedDate}</span></p>
+                        <p>Date: <span style={{ color: "#94a3b8" }}>{selectedEvidence.collectedDate?.replace("T", " ")}</span></p>
+                        {selectedEvidence.collectedByName && <p>Collected by: <span style={{ color: "#94a3b8" }}>{[selectedEvidence.collectedByRank?.replace(/ \(.*\)/, ""), selectedEvidence.collectedByName].filter(Boolean).join(" ")}</span></p>}
+                        {selectedEvidence.examiner && <p>Examiner: <span style={{ color: "#94a3b8" }}>{selectedEvidence.examiner}</span></p>}
                         {selectedEvidence.priority && (
                           <p>Priority: <span style={{ color: PRIORITY_CONFIG[selectedEvidence.priority].color }}>{PRIORITY_CONFIG[selectedEvidence.priority].label}</span></p>
                         )}
@@ -1108,9 +1021,8 @@ export default function EvidencePage() {
                     </div>
                   )}
 
-                  {/* Help text */}
-                  <div className="absolute bottom-4 right-4 text-xs" style={{ color: "#334155" }}>
-                    Drag nodes • Scroll to zoom • Click to inspect
+                  <div className="absolute bottom-4 right-4 text-xs" style={{ color: "#475569" }}>
+                    Drag to move • Scroll to zoom • Click a node to inspect
                   </div>
                 </>
               )}
@@ -1118,6 +1030,242 @@ export default function EvidencePage() {
           )}
         </div>
       </div>
+
+      {/* ── Evidence Form Modal ── */}
+      {showEvidenceForm && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 md:p-8" style={{ background: "rgba(2,6,15,0.8)", backdropFilter: "blur(4px)" }}>
+          <form
+            onSubmit={handleAddEvidence}
+            className="w-full max-w-5xl rounded-xl"
+            style={{ background: "#0d1626", border: "1px solid #243247", fontFamily: "Inter, system-ui, sans-serif" }}
+          >
+            <div className="flex items-center justify-between px-6 py-4 sticky top-0 z-10 rounded-t-xl" style={{ background: "#0d1626", borderBottom: "1px solid #243247" }}>
+              <div>
+                <h2 className="text-lg font-bold" style={{ color: "#e2e8f0" }}>Log New Evidence</h2>
+                <p className="text-xs" style={{ color: "#64748b" }}>Case {caseId} · fields marked <span style={{ color: "#f87171" }}>*</span> are required for a valid chain of custody</p>
+              </div>
+              <button type="button" onClick={() => setShowEvidenceForm(false)} aria-label="Close"><X className="w-5 h-5" style={{ color: "#64748b" }} /></button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <FormSection num={1} title="Evidence Identification">
+                <FormField required label="Category">
+                  <select value={form.category} onChange={setField("category")} className={inputClass} style={inputStyle}>
+                    {Object.entries(CATEGORY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="Exhibit / Tag Number">
+                  <input placeholder="e.g., EX-07" value={form.exhibitNumber} onChange={setField("exhibitNumber")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Priority">
+                  <select value={form.priority} onChange={setField("priority")} className={inputClass} style={{ ...inputStyle, color: PRIORITY_CONFIG[form.priority].color }}>
+                    {Object.entries(PRIORITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </FormField>
+                {category === "document" && (
+                  <FormField required label="Document Name">
+                    <input required placeholder="Bank statement, contract…" value={form.documentName} onChange={setField("documentName")} className={inputClass} style={inputStyle} />
+                  </FormField>
+                )}
+                {category === "electronic" && (
+                  <>
+                    <FormField label="Device Type">
+                      <select value={form.deviceType} onChange={setField("deviceType")} className={inputClass} style={inputStyle}>
+                        {DEVICE_TYPES.map(d => <option key={d}>{d}</option>)}
+                      </select>
+                    </FormField>
+                    <FormField label="Make / Model">
+                      <input placeholder="e.g., Samsung Galaxy S23" value={form.makeModel} onChange={setField("makeModel")} className={inputClass} style={inputStyle} />
+                    </FormField>
+                  </>
+                )}
+                {["electronic", "forensic_image"].includes(category) && (
+                  <FormField label="Identifiers (IMEI / MAC / Serial)">
+                    <input placeholder="IMEI: 358919…" value={form.identifyingInfo} onChange={setField("identifyingInfo")} className={inputClass} style={inputStyle} />
+                  </FormField>
+                )}
+                <FormField label="Item Description" span={3}>
+                  <textarea rows={2} placeholder="Describe the item: appearance, markings, state when found…" value={form.itemDescription} onChange={setField("itemDescription")} className={inputClass} style={{ ...inputStyle, resize: "vertical" }} />
+                </FormField>
+              </FormSection>
+
+              <FormSection num={2} title="Seizure Details">
+                <FormField required label="Date & Time Seized">
+                  <input required type="datetime-local" value={form.collectedDate} onChange={setField("collectedDate")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField required label="Seized From">
+                  <input required placeholder="John Doe (Suspect)" value={form.collectedFrom} onChange={setField("collectedFrom")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField required label="Seizure Location">
+                  <input required placeholder="Flat 4B, Building A…" value={form.location} onChange={setField("location")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Seizure Memo / Panchnama No.">
+                  <input placeholder="e.g., PN-2026-0142" value={form.seizureMemoNumber} onChange={setField("seizureMemoNumber")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Independent Witnesses (Panch)" span={2}>
+                  <input placeholder="Names of witnesses present at seizure" value={form.witnesses} onChange={setField("witnesses")} className={inputClass} style={inputStyle} />
+                </FormField>
+              </FormSection>
+
+              <FormSection num={3} title="Collected By (Seizing Officer)">
+                <FormField required label="Officer Name">
+                  <input required placeholder="e.g., Rajesh Patil" value={form.collectedByName} onChange={setField("collectedByName")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField required label="Rank">
+                  <select required value={form.collectedByRank} onChange={setField("collectedByRank")} className={inputClass} style={inputStyle}>
+                    <option value="">Select rank…</option>
+                    {RANKS.map(r => <option key={r}>{r}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="Badge / Employee ID">
+                  <input placeholder="e.g., MH-CY-2041" value={form.collectedByBadge} onChange={setField("collectedByBadge")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Unit / Police Station" span={3}>
+                  <input placeholder={caseInfo?.policeStation || "e.g., Cyber Police Station, BKC"} value={form.collectedByUnit} onChange={setField("collectedByUnit")} className={inputClass} style={inputStyle} />
+                </FormField>
+              </FormSection>
+
+              <FormSection num={4} title="Forensic Examination">
+                <FormField label="Examined / Operated By">
+                  <input placeholder="Analyst name" value={form.examiner} onChange={setField("examiner")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Rank / Designation">
+                  <select value={form.examinerRank} onChange={setField("examinerRank")} className={inputClass} style={inputStyle}>
+                    <option value="">Select…</option>
+                    {RANKS.map(r => <option key={r}>{r}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="Laboratory / Unit">
+                  <input placeholder="e.g., State Cyber Forensic Lab" value={form.examinerLab} onChange={setField("examinerLab")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Examination Date & Time">
+                  <input type="datetime-local" value={form.examinationDate} onChange={setField("examinationDate")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Tools Used">
+                  <input placeholder="e.g., Cellebrite UFED, FTK Imager" value={form.toolsUsed} onChange={setField("toolsUsed")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Method / Write-blocker">
+                  <input placeholder="e.g., Physical extraction via write-blocker" value={form.examinationMethod} onChange={setField("examinationMethod")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Findings Summary" span={3}>
+                  <textarea rows={2} placeholder="Key findings from the examination…" value={form.findings} onChange={setField("findings")} className={inputClass} style={{ ...inputStyle, resize: "vertical" }} />
+                </FormField>
+              </FormSection>
+
+              <FormSection num={5} title="Chain of Custody">
+                <FormField label="CoC Reference No.">
+                  <input placeholder="CoC-2026-001" value={form.chainOfCustodyNumber} onChange={setField("chainOfCustodyNumber")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Current Custodian">
+                  <input placeholder="Person currently holding the item" value={form.currentCustodian} onChange={setField("currentCustodian")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <FormField label="Storage Location">
+                  <input placeholder="e.g., Malkhana Locker 12" value={form.storageLocation} onChange={setField("storageLocation")} className={inputClass} style={inputStyle} />
+                </FormField>
+                <div className="md:col-span-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold" style={{ color: "#94a3b8" }}>CUSTODY TRANSFERS</label>
+                    <button type="button" onClick={addTransfer} className="text-xs px-3 py-1 rounded-md font-semibold" style={{ border: "1px solid #334155", color: "#93c5fd" }}>+ Add transfer</button>
+                  </div>
+                  {custodyTransfers.length === 0 && <p className="text-xs" style={{ color: "#475569" }}>No transfers recorded. Add one each time the item changes hands.</p>}
+                  {custodyTransfers.map((t, i) => (
+                    <div key={i} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_1.2fr_auto] gap-2 items-center">
+                      <input placeholder="Released by" value={t.fromPerson} onChange={e => updateTransfer(i, "fromPerson", e.target.value)} className={inputClass} style={inputStyle} />
+                      <input placeholder="Received by" value={t.toPerson} onChange={e => updateTransfer(i, "toPerson", e.target.value)} className={inputClass} style={inputStyle} />
+                      <input type="datetime-local" value={t.date} onChange={e => updateTransfer(i, "date", e.target.value)} className={inputClass} style={inputStyle} />
+                      <input placeholder="Purpose (e.g., lab analysis)" value={t.purpose} onChange={e => updateTransfer(i, "purpose", e.target.value)} className={inputClass} style={inputStyle} />
+                      <button type="button" onClick={() => removeTransfer(i)} aria-label="Remove transfer"><Trash2 className="w-4 h-4" style={{ color: "#ef4444" }} /></button>
+                    </div>
+                  ))}
+                </div>
+              </FormSection>
+
+              <FormSection num={6} title="Integrity & Condition">
+                <FormField label="MD5 Hash">
+                  <input placeholder="d41d8cd98f00b204e9800998ecf8427e" value={form.hashMD5} onChange={setField("hashMD5")} className={inputClass} style={{ ...inputStyle, fontFamily: "monospace", fontSize: "12px" }} />
+                </FormField>
+                <FormField label="SHA-256 Hash" span={2}>
+                  <input placeholder="e3b0c44298fc1c149afb…" value={form.hashSHA256} onChange={setField("hashSHA256")} className={inputClass} style={{ ...inputStyle, fontFamily: "monospace", fontSize: "12px" }} />
+                </FormField>
+                <FormField label="Physical Condition">
+                  <select value={form.condition} onChange={setField("condition")} className={inputClass} style={inputStyle}>
+                    {CONDITIONS.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </FormField>
+                <FormField label="Evidence Sealed?">
+                  <label className="flex items-center gap-2 h-[38px] text-sm" style={{ color: "#cbd5e1" }}>
+                    <input type="checkbox" checked={form.sealed} onChange={e => setForm(p => ({ ...p, sealed: e.target.checked }))} className="w-4 h-4" />
+                    Sealed in evidence bag
+                  </label>
+                </FormField>
+                <FormField label="Seal Number">
+                  <input disabled={!form.sealed} placeholder="e.g., SL-889120" value={form.sealNumber} onChange={setField("sealNumber")} className={inputClass + " disabled:opacity-40"} style={inputStyle} />
+                </FormField>
+              </FormSection>
+
+              <FormSection num={7} title="Tags, Notes & Attachments">
+                <div className="md:col-span-3">
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "#94a3b8" }}>TAGS</label>
+                  <div className="flex gap-2 mb-2">
+                    <input
+                      placeholder="ransomware, suspect-a…"
+                      value={tagInput}
+                      onChange={e => setTagInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
+                      className={inputClass + " flex-1"}
+                      style={inputStyle}
+                    />
+                    <button type="button" onClick={addTag} className="px-4 py-2 rounded-lg text-xs font-semibold" style={{ border: "1px solid #334155", color: "#93c5fd" }}>Add</button>
+                  </div>
+                  {tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {tags.map(t => (
+                        <span key={t} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs" style={{ background: "rgba(148,163,184,0.1)", border: "1px solid #334155", color: "#cbd5e1" }}>
+                          <Tag className="w-2.5 h-2.5" />{t}
+                          <button type="button" onClick={() => setTags(p => p.filter(x => x !== t))}><X className="w-2.5 h-2.5" /></button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <FormField label="Investigator Notes" span={3}>
+                  <textarea rows={3} placeholder="Additional observations, context…" value={form.notes} onChange={setField("notes")} className={inputClass} style={{ ...inputStyle, resize: "vertical" }} />
+                </FormField>
+                <div className="md:col-span-3">
+                  <label className="flex items-center justify-center gap-3 py-4 rounded-lg cursor-pointer" style={{ border: "1px dashed #334155", color: "#94a3b8" }}>
+                    <Upload className="w-4 h-4" />
+                    <span className="text-xs">Attach files ({ACCEPTED_TYPES[category]})</span>
+                    <input type="file" multiple accept={ACCEPTED_TYPES[category]} onChange={handleFileUpload} className="hidden" />
+                  </label>
+                  {uploadedFiles.length > 0 && (
+                    <div className="space-y-1.5 mt-2">
+                      {uploadedFiles.map((f, i) => (
+                        <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: "#111b2e", border: "1px solid #243247" }}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            {f.type.startsWith("image/") ? <Image className="w-3.5 h-3.5 shrink-0" style={{ color: "#10b981" }} /> : <File className="w-3.5 h-3.5 shrink-0" style={{ color: "#93c5fd" }} />}
+                            <span className="text-xs truncate" style={{ color: "#cbd5e1" }}>{f.name}</span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 ml-2">
+                            <span className="text-xs" style={{ color: "#64748b" }}>{formatBytes(f.size)}</span>
+                            <button type="button" onClick={() => removeFile(i)}><Trash2 className="w-3.5 h-3.5" style={{ color: "#ef4444" }} /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </FormSection>
+            </div>
+
+            <div className="flex justify-end gap-3 px-6 py-4 sticky bottom-0 rounded-b-xl" style={{ background: "#0d1626", borderTop: "1px solid #243247" }}>
+              <button type="button" onClick={() => { resetEvidenceForm(); setShowEvidenceForm(false); }} disabled={isSaving} className="px-5 py-2.5 rounded-lg text-sm font-semibold" style={{ border: "1px solid #334155", color: "#94a3b8" }}>Cancel</button>
+              <button type="submit" disabled={isSaving} className="px-5 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2" style={{ background: isSaving ? "#1e293b" : "#2563eb", color: "#fff" }}>
+                {isSaving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : <><Save className="w-4 h-4" /> Save to Chain of Custody</>}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* ── AI Correlation Modal ── */}
       {showAiModal && (
@@ -1200,42 +1348,40 @@ export default function EvidencePage() {
 // ─── Sub-components ────────────────────────────────────────────────────────────
 const inputClass = "w-full px-3 py-2 rounded-lg text-sm outline-none transition-all";
 const inputStyle: React.CSSProperties = {
-  background: "rgba(15,23,42,0.8)",
-  border: "1px solid rgba(99,179,237,0.15)",
+  background: "#111b2e",
+  border: "1px solid #243247",
   color: "#e2e8f0",
 };
 
-function FormField({ label, icon, children }: { label: string; icon: React.ReactNode; children: React.ReactNode }) {
+function FormField({ label, required, span, children }: { label: string; required?: boolean; span?: 2 | 3; children: React.ReactNode }) {
+  const spanCls = span === 3 ? "md:col-span-3" : span === 2 ? "md:col-span-2" : "";
   return (
-    <div>
-      <label className="flex items-center gap-1 text-xs mb-1" style={{ color: "#64748b" }}>
-        <span style={{ color: "#475569" }}>{icon}</span>
-        {label.toUpperCase()}
+    <div className={spanCls}>
+      <label className="block text-xs font-semibold mb-1" style={{ color: "#94a3b8" }}>
+        {label.toUpperCase()}{required && <span style={{ color: "#f87171" }}> *</span>}
       </label>
       {children}
     </div>
   );
 }
 
-function SectionToggle({ label, id, open, toggle }: { label: string; id: string; open: boolean; toggle: (s: string) => void }) {
+function FormSection({ num, title, children }: { num: number; title: string; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={() => toggle(id)}
-      className="w-full flex items-center justify-between text-xs py-2 px-0 transition-all"
-      style={{ color: "#475569", letterSpacing: "0.08em" }}
-    >
-      <span>{label}</span>
-      {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-    </button>
+    <section className="rounded-lg p-5" style={{ background: "#0b1220", border: "1px solid #1e293b" }}>
+      <h3 className="flex items-center gap-2.5 text-sm font-bold mb-4" style={{ color: "#e2e8f0" }}>
+        <span className="w-6 h-6 rounded-md flex items-center justify-center text-xs" style={{ background: "#1e293b", color: "#93c5fd" }}>{num}</span>
+        {title}
+      </h3>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{children}</div>
+    </section>
   );
 }
 
-function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function InfoRow({ label, value, mono, wrap }: { label: string; value: string; mono?: boolean; wrap?: boolean }) {
   return (
-    <div className="flex gap-1">
-      <span style={{ color: "#475569", minWidth: "70px" }}>{label}:</span>
-      <span className="truncate" style={{ color: "#94a3b8", fontFamily: mono ? "monospace" : "inherit", fontSize: mono ? "10px" : "inherit" }}>{value}</span>
+    <div className="flex gap-1 text-xs">
+      <span className="shrink-0" style={{ color: "#475569", minWidth: "78px" }}>{label}:</span>
+      <span className={wrap ? "break-words" : "truncate"} title={value} style={{ color: "#94a3b8", fontFamily: mono ? "monospace" : "inherit", fontSize: mono ? "10px" : "inherit" }}>{value}</span>
     </div>
   );
 }
