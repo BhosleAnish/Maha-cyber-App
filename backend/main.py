@@ -38,6 +38,36 @@ class CaseCreate(BaseModel):
     title: str
     description: str
     status: str = "Investigation Pending"
+    # Case identity
+    firNumber: Optional[str] = None
+    caseType: Optional[str] = None
+    priority: Optional[str] = "Medium"
+    # Ownership
+    officerName: Optional[str] = None
+    officerRank: Optional[str] = None
+    officerBadgeId: Optional[str] = None
+    officerContact: Optional[str] = None
+    supervisingOfficer: Optional[str] = None
+    # Jurisdiction
+    policeStation: Optional[str] = None
+    district: Optional[str] = None
+    state: Optional[str] = "Maharashtra"
+    court: Optional[str] = None
+    # Incident
+    incidentDate: Optional[str] = None
+    reportedDate: Optional[str] = None
+    complainant: Optional[str] = None
+    suspects: Optional[str] = None
+    estimatedLoss: Optional[str] = None
+    legalSections: Optional[str] = None
+
+CASE_FIELDS = [f for f in CaseCreate.model_fields if f != "id"]
+
+class CustodyTransfer(BaseModel):
+    fromPerson: str = ""
+    toPerson: str = ""
+    date: str = ""
+    purpose: str = ""
 
 class EvidenceCreate(BaseModel):
     category: str
@@ -47,6 +77,44 @@ class EvidenceCreate(BaseModel):
     documentName: Optional[str] = None
     deviceType: Optional[str] = None
     identifyingInfo: Optional[str] = None
+    # Identification
+    itemDescription: Optional[str] = None
+    exhibitNumber: Optional[str] = None
+    makeModel: Optional[str] = None
+    priority: Optional[str] = "medium"
+    # Seizure
+    seizureMemoNumber: Optional[str] = None
+    witnesses: Optional[str] = None
+    # Collected by
+    collectedByName: Optional[str] = None
+    collectedByRank: Optional[str] = None
+    collectedByBadge: Optional[str] = None
+    collectedByUnit: Optional[str] = None
+    # Forensic handling
+    examiner: Optional[str] = None
+    examinerRank: Optional[str] = None
+    examinerLab: Optional[str] = None
+    examinationDate: Optional[str] = None
+    toolsUsed: Optional[str] = None
+    examinationMethod: Optional[str] = None
+    findings: Optional[str] = None
+    # Chain of custody
+    chainOfCustodyNumber: Optional[str] = None
+    currentCustodian: Optional[str] = None
+    storageLocation: Optional[str] = None
+    custodyTransfers: List[CustodyTransfer] = []
+    # Integrity
+    hashMD5: Optional[str] = None
+    hashSHA256: Optional[str] = None
+    condition: Optional[str] = None
+    sealed: Optional[bool] = False
+    sealNumber: Optional[str] = None
+    # Tags & notes
+    tags: List[str] = []
+    notes: Optional[str] = None
+    filesCount: int = 0
+
+EVIDENCE_FIELDS = [f for f in EvidenceCreate.model_fields if f != "category"]
 
 class CorrelationCreate(BaseModel):
     from_evidence: str  # Changed from 'from' to 'from_evidence' to avoid Python keyword
@@ -70,6 +138,7 @@ def create_case(case: CaseCreate, db: Database = Depends(get_db)):
         "title": case.title,
         "description": case.description,
         "status": case.status,
+        **{f: getattr(case, f) for f in CASE_FIELDS if f not in ("title", "description", "status")},
         "created_at": datetime.utcnow(),
     })
     return {"message": "Case created successfully", "id": case.id}
@@ -85,6 +154,7 @@ def get_all_cases(db: Database = Depends(get_db)):
         "status": c.get("status"),
         "lastUpdated": c["created_at"].strftime("%Y-%m-%d"),
         "itemsCount": counts.get(c["_id"], 0),
+        **{f: c.get(f) for f in ("firNumber", "caseType", "priority", "officerName", "officerRank", "policeStation", "district")},
     } for c in db.cases.find()]
 
 @app.get("/api/cases/{case_id}")
@@ -100,6 +170,7 @@ def get_case_details(case_id: str, db: Database = Depends(get_db)):
         "status": case.get("status"),
         "created_at": case["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
         "evidence_count": db.evidences.count_documents({"case_id": case_id}),
+        **{f: case.get(f) for f in CASE_FIELDS if f not in ("title", "description", "status")},
     }
 
 @app.post("/api/cases/{case_id}/evidence")
@@ -112,12 +183,7 @@ def add_evidence(case_id: str, ev: EvidenceCreate, db: Database = Depends(get_db
         "id": evidence_id,
         "case_id": case_id,
         "category": ev.category,
-        "collectedDate": ev.collectedDate,
-        "collectedFrom": ev.collectedFrom,
-        "location": ev.location,
-        "documentName": ev.documentName,
-        "deviceType": ev.deviceType,
-        "identifyingInfo": ev.identifyingInfo,
+        **ev.model_dump(exclude={"category"}),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
     return {"status": "success", "evidence_id": evidence_id}
@@ -131,13 +197,8 @@ def get_case_evidence(case_id: str, db: Database = Depends(get_db)):
     return [{
         "id": f"EVD-{e['id']}",
         "category": e.get("category"),
-        "collectedDate": e.get("collectedDate"),
-        "collectedFrom": e.get("collectedFrom"),
-        "location": e.get("location"),
-        "documentName": e.get("documentName"),
-        "deviceType": e.get("deviceType"),
-        "identifyingInfo": e.get("identifyingInfo"),
         "timestamp": e.get("timestamp"),
+        **{f: e.get(f) for f in EVIDENCE_FIELDS},
     } for e in db.evidences.find({"case_id": case_id}).sort("id", -1)]
 
 # --- CORRELATION ENDPOINTS ---

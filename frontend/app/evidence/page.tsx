@@ -11,6 +11,47 @@ interface CaseItem {
   status: string;
   lastUpdated: string;
   itemsCount: number;
+  firNumber?: string;
+  caseType?: string;
+  priority?: string;
+  officerName?: string;
+  officerRank?: string;
+  policeStation?: string;
+  district?: string;
+}
+
+const EMPTY_CASE = {
+  id: "", title: "", description: "", status: "Investigation Pending",
+  firNumber: "", caseType: "", priority: "Medium",
+  officerName: "", officerRank: "", officerBadgeId: "", officerContact: "", supervisingOfficer: "",
+  policeStation: "", district: "", state: "Maharashtra", court: "",
+  incidentDate: "", reportedDate: "", complainant: "", suspects: "", estimatedLoss: "", legalSections: "",
+};
+
+const CASE_TYPES = ["Ransomware / Malware", "Financial Fraud / UPI", "Identity Theft", "Data Breach", "Phishing", "Cyber Stalking / Harassment", "Sextortion", "Hacking / Unauthorized Access", "Online Child Safety", "Social Media Crime", "Other"];
+const RANKS = ["Police Constable", "Head Constable", "Assistant Sub-Inspector (ASI)", "Sub-Inspector (SI)", "Police Inspector (PI)", "Assistant Commissioner (ACP)", "Deputy Commissioner (DCP)", "Additional Commissioner", "Commissioner of Police"];
+const PRIORITIES = ["Low", "Medium", "High", "Critical"];
+
+const inputCls = "w-full p-2.5 border border-gray-400 rounded-lg outline-none text-black bg-white focus:border-black text-sm";
+
+function Field({ label, required, children, className = "" }: { label: string; required?: boolean; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={className}>
+      <label className="block text-sm font-bold text-black mb-1">
+        {label}{required && <span className="text-red-600"> *</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <fieldset className="border border-gray-300 rounded-xl p-4 bg-white">
+      <legend className="px-2 text-xs font-bold tracking-wider uppercase text-gray-600">{title}</legend>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{children}</div>
+    </fieldset>
+  );
 }
 
 export default function EvidenceDashboardPage() {
@@ -20,15 +61,10 @@ export default function EvidenceDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Detailed Form State
-  const [newCase, setNewCase] = useState({
-    id: "",
-    title: "",
-    description: "",
-    status: "Investigation Pending"
-  });
+  const [newCase, setNewCase] = useState({ ...EMPTY_CASE });
+  const set = (k: keyof typeof EMPTY_CASE) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setNewCase({ ...newCase, [k]: e.target.value });
 
-  // Fetch real cases from Database
   useEffect(() => {
     fetchCases();
   }, []);
@@ -37,8 +73,7 @@ export default function EvidenceDashboardPage() {
     try {
       const response = await fetch("/backend/api/cases");
       if (response.ok) {
-        const data = await response.json();
-        setCases(data);
+        setCases(await response.json());
       } else {
         console.error("Failed to fetch cases");
       }
@@ -49,16 +84,14 @@ export default function EvidenceDashboardPage() {
     }
   };
 
-  // Save Detailed Case to Database
   const handleCreateNewCase = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCase.id.trim() || !newCase.title.trim()) {
-      alert("Please fill in all required fields");
+    if (!newCase.id.trim() || !newCase.title.trim() || !newCase.officerName.trim() || !newCase.officerRank || !newCase.policeStation.trim() || !newCase.district.trim()) {
+      alert("Please fill in all required fields (case number, title, officer, rank, police station, district)");
       return;
     }
 
     setIsSaving(true);
-
     try {
       const response = await fetch("/backend/api/cases", {
         method: "POST",
@@ -67,7 +100,6 @@ export default function EvidenceDashboardPage() {
       });
 
       if (response.ok) {
-        // Route to the specific case evidence page
         router.push(`/evidence/${newCase.id.trim()}`);
       } else {
         const error = await response.json();
@@ -97,10 +129,10 @@ export default function EvidenceDashboardPage() {
           <h1 className="text-3xl font-bold tracking-tight text-black">Evidence Dashboard</h1>
           <p className="text-gray-600 mt-1">Manage cases and their associated chains of custody.</p>
         </div>
-        
+
         {cases.length > 0 && !isCreatingNew && (
-          <button 
-            onClick={() => setIsCreatingNew(true)} 
+          <button
+            onClick={() => setIsCreatingNew(true)}
             className="bg-black hover:bg-gray-800 text-white font-bold py-2.5 px-5 rounded-lg flex items-center gap-2 transition-colors"
           >
             <Plus className="w-5 h-5" />
@@ -115,59 +147,105 @@ export default function EvidenceDashboardPage() {
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-black">
             <FolderPlus className="w-6 h-6" /> Define New Case Details
           </h2>
-          
-          <form onSubmit={handleCreateNewCase} className="space-y-4 max-w-3xl">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-bold text-black mb-1">Case Number / ID</label>
-                <input 
-                  type="text" 
-                  required 
-                  placeholder="e.g., CR-2026-101" 
-                  className="w-full p-3 border border-gray-400 rounded-lg outline-none text-black bg-white" 
-                  value={newCase.id} 
-                  onChange={(e) => setNewCase({...newCase, id: e.target.value})} 
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-black mb-1">Case Title</label>
-                <input 
-                  type="text" 
-                  required 
-                  placeholder="e.g., Ransomware Attack on Hospital" 
-                  className="w-full p-3 border border-gray-400 rounded-lg outline-none text-black bg-white" 
-                  value={newCase.title} 
-                  onChange={(e) => setNewCase({...newCase, title: e.target.value})} 
-                />
-              </div>
-            </div>
 
-            <div>
-              <label className="block text-sm font-bold text-black mb-1">Crime Description</label>
-              <textarea 
-                required 
-                rows={3} 
-                placeholder="Provide a detailed description of the cyber crime..." 
-                className="w-full p-3 border border-gray-400 rounded-lg outline-none text-black bg-white resize-none" 
-                value={newCase.description} 
-                onChange={(e) => setNewCase({...newCase, description: e.target.value})}
-              ></textarea>
-            </div>
+          <form onSubmit={handleCreateNewCase} className="space-y-5">
+            <FormSection title="Case Identity">
+              <Field label="Case Number / ID" required>
+                <input type="text" required placeholder="e.g., CR-2026-101" className={inputCls} value={newCase.id} onChange={set("id")} />
+              </Field>
+              <Field label="FIR / Crime Number">
+                <input type="text" placeholder="e.g., FIR 0142/2026" className={inputCls} value={newCase.firNumber} onChange={set("firNumber")} />
+              </Field>
+              <Field label="Case Title" required>
+                <input type="text" required placeholder="e.g., Ransomware Attack on Hospital" className={inputCls} value={newCase.title} onChange={set("title")} />
+              </Field>
+              <Field label="Case Type">
+                <select className={inputCls} value={newCase.caseType} onChange={set("caseType")}>
+                  <option value="">Select type…</option>
+                  {CASE_TYPES.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </Field>
+              <Field label="Priority">
+                <select className={inputCls} value={newCase.priority} onChange={set("priority")}>
+                  {PRIORITIES.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </Field>
+              <Field label="Applicable Sections (IT Act / BNS)">
+                <input type="text" placeholder="e.g., IT Act 66C, 66D; BNS 318" className={inputCls} value={newCase.legalSections} onChange={set("legalSections")} />
+              </Field>
+            </FormSection>
 
-            <div className="flex justify-end gap-2 mt-4">
-              <button 
-                type="button" 
+            <FormSection title="Investigating Officer">
+              <Field label="Officer Name" required>
+                <input type="text" required placeholder="e.g., Rajesh Patil" className={inputCls} value={newCase.officerName} onChange={set("officerName")} />
+              </Field>
+              <Field label="Rank" required>
+                <select required className={inputCls} value={newCase.officerRank} onChange={set("officerRank")}>
+                  <option value="">Select rank…</option>
+                  {RANKS.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </Field>
+              <Field label="Badge / Employee ID">
+                <input type="text" placeholder="e.g., MH-CY-2041" className={inputCls} value={newCase.officerBadgeId} onChange={set("officerBadgeId")} />
+              </Field>
+              <Field label="Contact Number">
+                <input type="tel" placeholder="e.g., +91 98XXXXXXXX" className={inputCls} value={newCase.officerContact} onChange={set("officerContact")} />
+              </Field>
+              <Field label="Supervising Officer">
+                <input type="text" placeholder="e.g., ACP Sunita Deshmukh" className={inputCls} value={newCase.supervisingOfficer} onChange={set("supervisingOfficer")} />
+              </Field>
+            </FormSection>
+
+            <FormSection title="Police Station & Jurisdiction">
+              <Field label="Police Station" required>
+                <input type="text" required placeholder="e.g., Cyber Police Station, BKC" className={inputCls} value={newCase.policeStation} onChange={set("policeStation")} />
+              </Field>
+              <Field label="District / Commissionerate" required>
+                <input type="text" required placeholder="e.g., Mumbai City" className={inputCls} value={newCase.district} onChange={set("district")} />
+              </Field>
+              <Field label="State">
+                <input type="text" className={inputCls} value={newCase.state} onChange={set("state")} />
+              </Field>
+              <Field label="Court of Jurisdiction" className="md:col-span-2 lg:col-span-3">
+                <input type="text" placeholder="e.g., Metropolitan Magistrate Court, Esplanade" className={inputCls} value={newCase.court} onChange={set("court")} />
+              </Field>
+            </FormSection>
+
+            <FormSection title="Incident Details">
+              <Field label="Date & Time of Incident">
+                <input type="datetime-local" className={inputCls} value={newCase.incidentDate} onChange={set("incidentDate")} />
+              </Field>
+              <Field label="Date Reported">
+                <input type="date" className={inputCls} value={newCase.reportedDate} onChange={set("reportedDate")} />
+              </Field>
+              <Field label="Estimated Loss (₹)">
+                <input type="text" placeholder="e.g., 4,50,000" className={inputCls} value={newCase.estimatedLoss} onChange={set("estimatedLoss")} />
+              </Field>
+              <Field label="Complainant / Victim">
+                <input type="text" placeholder="Name of complainant" className={inputCls} value={newCase.complainant} onChange={set("complainant")} />
+              </Field>
+              <Field label="Suspect(s)" className="lg:col-span-2">
+                <input type="text" placeholder="Known suspects or aliases, if any" className={inputCls} value={newCase.suspects} onChange={set("suspects")} />
+              </Field>
+              <Field label="Crime Description" required className="md:col-span-2 lg:col-span-3">
+                <textarea required rows={3} placeholder="Provide a detailed description of the cyber crime..." className={inputCls + " resize-none"} value={newCase.description} onChange={set("description")}></textarea>
+              </Field>
+            </FormSection>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
                 onClick={() => {
                   setIsCreatingNew(false);
-                  setNewCase({ id: "", title: "", description: "", status: "Investigation Pending" });
-                }} 
+                  setNewCase({ ...EMPTY_CASE });
+                }}
                 className="px-6 py-3 border border-gray-400 text-black font-bold rounded-lg hover:bg-gray-200"
                 disabled={isSaving}
               >
                 Cancel
               </button>
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={isSaving}
                 className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-bold px-6 py-3 rounded-lg flex items-center gap-2"
               >
@@ -198,8 +276,8 @@ export default function EvidenceDashboardPage() {
           <p className="text-gray-600 max-w-md mx-auto mb-6">
             Create your first case file to begin logging the chain of custody.
           </p>
-          <button 
-            onClick={() => setIsCreatingNew(true)} 
+          <button
+            onClick={() => setIsCreatingNew(true)}
             className="bg-black hover:bg-gray-800 text-white font-bold py-3 px-6 rounded-lg flex items-center gap-2"
           >
             <Plus className="w-5 h-5" /> Create Your First Case
@@ -207,13 +285,13 @@ export default function EvidenceDashboardPage() {
         </div>
       )}
 
-      {/* EXISTING CASES GRID (Real Database Data) */}
+      {/* EXISTING CASES GRID */}
       {cases.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {cases.map((caseItem) => (
-            <div 
-              key={caseItem.id} 
-              onClick={() => router.push(`/evidence/${caseItem.id}`)} 
+            <div
+              key={caseItem.id}
+              onClick={() => router.push(`/evidence/${caseItem.id}`)}
               className="bg-white border border-gray-300 rounded-xl p-6 shadow-sm hover:shadow-md hover:border-black transition-all cursor-pointer group flex flex-col justify-between"
             >
               <div>
@@ -221,14 +299,31 @@ export default function EvidenceDashboardPage() {
                   <div className="bg-gray-100 p-3 rounded-lg group-hover:bg-black group-hover:text-white">
                     <FolderOpen className="w-6 h-6" />
                   </div>
-                  <span className="text-xs font-bold bg-gray-200 text-black px-2 py-1 rounded border border-gray-300">
-                    {caseItem.id}
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-xs font-bold bg-gray-200 text-black px-2 py-1 rounded border border-gray-300">
+                      {caseItem.id}
+                    </span>
+                    {caseItem.caseType && <span className="text-[11px] text-gray-600">{caseItem.caseType}</span>}
+                  </div>
                 </div>
                 <h3 className="text-lg font-bold text-black mb-1 line-clamp-1">{caseItem.title}</h3>
-                <p className="text-sm text-gray-600 line-clamp-2 mb-4">
+                <p className="text-sm text-gray-600 line-clamp-2 mb-3">
                   {caseItem.description || "No description provided."}
                 </p>
+                {(caseItem.officerName || caseItem.policeStation) && (
+                  <div className="text-xs text-gray-700 space-y-0.5 mb-4">
+                    {caseItem.officerName && (
+                      <div>
+                        <span className="font-bold">IO:</span> {caseItem.officerRank ? `${caseItem.officerRank.replace(/ \(.*\)/, "")} ` : ""}{caseItem.officerName}
+                      </div>
+                    )}
+                    {caseItem.policeStation && (
+                      <div>
+                        <span className="font-bold">PS:</span> {caseItem.policeStation}{caseItem.district ? `, ${caseItem.district}` : ""}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="mt-auto pt-4 border-t border-gray-200 flex items-center justify-between text-sm text-gray-600">
                 <div className="flex items-center gap-1">
