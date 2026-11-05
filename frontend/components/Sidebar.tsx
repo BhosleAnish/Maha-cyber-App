@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
-import { LayoutDashboard, FileText, Scale, BookOpen, ShieldAlert, ArrowLeftRight } from "lucide-react";
+import { useSession, signOut } from "next-auth/react";
+import { LayoutDashboard, FileText, Scale, BookOpen, ShieldAlert, ArrowLeftRight, LogOut } from "lucide-react";
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -57,6 +57,13 @@ export default function Sidebar() {
             <p className="text-xs text-slate-400">{badge ? `ID: ${badge}` : ""}</p>
           </div>
         </div>
+        <button
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className="mt-3 w-full flex items-center justify-center gap-2 p-2.5 rounded-lg text-sm font-medium text-red-300 hover:bg-red-500/10 hover:text-red-200 border border-slate-700 transition-colors"
+        >
+          <LogOut size={16} />
+          Log out
+        </button>
       </div>
     </div>
   );
