@@ -11,23 +11,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# SQLAlchemy imports
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-from models import Base, Case, Evidence, Correlation
+from pymongo.database import Database
+from fastapi.concurrency import run_in_threadpool
+from db import get_db, init_db, next_id
 from auth import router as auth_router
 
-# --- Database Setup (SQLite for local testing) ---
-# Postgres in production (DATABASE_URL), SQLite file for local development
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./maha_cyber.db")
-if SQLALCHEMY_DATABASE_URL.startswith("postgres://"):  # older Render/Heroku style URL
-    SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
-_connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=_connect_args, pool_pre_ping=True)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create tables in the database file
-Base.metadata.create_all(bind=engine)
+init_db()
 
 app = FastAPI(title="Maha Cyber API")
 
@@ -42,14 +31,6 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
-
-# --- Dependency: Get Database Session ---
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 # --- Pydantic Schemas (For API Validation) ---
 class CaseCreate(BaseModel):
@@ -80,169 +61,129 @@ def read_root():
     return {"message": "Maharashtra Cyber Portal API", "status": "running"}
 
 @app.post("/api/cases")
-def create_case(case: CaseCreate, db: Session = Depends(get_db)):
+def create_case(case: CaseCreate, db: Database = Depends(get_db)):
     """Create a new case"""
-    db_case = db.query(Case).filter(Case.id == case.id).first()
-    if db_case:
+    if db.cases.find_one({"_id": case.id}):
         raise HTTPException(status_code=400, detail="Case ID already exists")
-    
-    new_case = Case(
-        id=case.id, 
-        title=case.title,
-        description=case.description,
-        status=case.status
-    )
-    db.add(new_case)
-    db.commit()
-    db.refresh(new_case)
-    return {"message": "Case created successfully", "id": new_case.id}
-
-@app.get("/api/cases")
-def get_all_cases(db: Session = Depends(get_db)):
-    """Get all cases with their evidence count"""
-    cases = db.query(Case).all()
-    result = []
-    for c in cases:
-        result.append({
-            "id": c.id,
-            "title": c.title,
-            "description": c.description,
-            "status": c.status,
-            "lastUpdated": c.created_at.strftime("%Y-%m-%d"),
-            "itemsCount": len(c.evidences)
-        })
-    return result
-
-@app.get("/api/cases/{case_id}")
-def get_case_details(case_id: str, db: Session = Depends(get_db)):
-    """Get detailed information about a specific case"""
-    case = db.query(Case).filter(Case.id == case_id).first()
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    
-    return {
-        "id": case.id,
+    db.cases.insert_one({
+        "_id": case.id,
         "title": case.title,
         "description": case.description,
         "status": case.status,
-        "created_at": case.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-        "evidence_count": len(case.evidences)
+        "created_at": datetime.utcnow(),
+    })
+    return {"message": "Case created successfully", "id": case.id}
+
+@app.get("/api/cases")
+def get_all_cases(db: Database = Depends(get_db)):
+    """Get all cases with their evidence count"""
+    counts = {r["_id"]: r["n"] for r in db.evidences.aggregate([{"$group": {"_id": "$case_id", "n": {"$sum": 1}}}])}
+    return [{
+        "id": c["_id"],
+        "title": c.get("title"),
+        "description": c.get("description"),
+        "status": c.get("status"),
+        "lastUpdated": c["created_at"].strftime("%Y-%m-%d"),
+        "itemsCount": counts.get(c["_id"], 0),
+    } for c in db.cases.find()]
+
+@app.get("/api/cases/{case_id}")
+def get_case_details(case_id: str, db: Database = Depends(get_db)):
+    """Get detailed information about a specific case"""
+    case = db.cases.find_one({"_id": case_id})
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    return {
+        "id": case["_id"],
+        "title": case.get("title"),
+        "description": case.get("description"),
+        "status": case.get("status"),
+        "created_at": case["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+        "evidence_count": db.evidences.count_documents({"case_id": case_id}),
     }
 
 @app.post("/api/cases/{case_id}/evidence")
-def add_evidence(case_id: str, ev: EvidenceCreate, db: Session = Depends(get_db)):
+def add_evidence(case_id: str, ev: EvidenceCreate, db: Database = Depends(get_db)):
     """Add evidence to a specific case"""
-    db_case = db.query(Case).filter(Case.id == case_id).first()
-    if not db_case:
+    if not db.cases.find_one({"_id": case_id}):
         raise HTTPException(status_code=404, detail="Case not found")
-        
-    new_evidence = Evidence(
-        case_id=case_id,
-        category=ev.category,
-        collectedDate=ev.collectedDate,
-        collectedFrom=ev.collectedFrom,
-        location=ev.location,
-        documentName=ev.documentName,
-        deviceType=ev.deviceType,
-        identifyingInfo=ev.identifyingInfo,
-        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    )
-    db.add(new_evidence)
-    db.commit()
-    db.refresh(new_evidence)
-    return {"status": "success", "evidence_id": new_evidence.id}
+    evidence_id = next_id(db, "evidences")
+    db.evidences.insert_one({
+        "id": evidence_id,
+        "case_id": case_id,
+        "category": ev.category,
+        "collectedDate": ev.collectedDate,
+        "collectedFrom": ev.collectedFrom,
+        "location": ev.location,
+        "documentName": ev.documentName,
+        "deviceType": ev.deviceType,
+        "identifyingInfo": ev.identifyingInfo,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    return {"status": "success", "evidence_id": evidence_id}
 
 @app.get("/api/cases/{case_id}/evidence")
-def get_case_evidence(case_id: str, db: Session = Depends(get_db)):
+def get_case_evidence(case_id: str, db: Database = Depends(get_db)):
     """Get all evidence for a specific case"""
-    # Verify case exists
-    case = db.query(Case).filter(Case.id == case_id).first()
-    if not case:
+    if not db.cases.find_one({"_id": case_id}):
         raise HTTPException(status_code=404, detail="Case not found")
-    
-    evidence_list = db.query(Evidence).filter(
-        Evidence.case_id == case_id
-    ).order_by(Evidence.id.desc()).all()
-    
     # Format it exactly as the React frontend expects
     return [{
-        "id": f"EVD-{e.id}",
-        "category": e.category,
-        "collectedDate": e.collectedDate,
-        "collectedFrom": e.collectedFrom,
-        "location": e.location,
-        "documentName": e.documentName,
-        "deviceType": e.deviceType,
-        "identifyingInfo": e.identifyingInfo,
-        "timestamp": e.timestamp
-    } for e in evidence_list]
+        "id": f"EVD-{e['id']}",
+        "category": e.get("category"),
+        "collectedDate": e.get("collectedDate"),
+        "collectedFrom": e.get("collectedFrom"),
+        "location": e.get("location"),
+        "documentName": e.get("documentName"),
+        "deviceType": e.get("deviceType"),
+        "identifyingInfo": e.get("identifyingInfo"),
+        "timestamp": e.get("timestamp"),
+    } for e in db.evidences.find({"case_id": case_id}).sort("id", -1)]
 
-# --- CORRELATION ENDPOINTS (NEW) ---
+# --- CORRELATION ENDPOINTS ---
 
 @app.post("/api/cases/{case_id}/correlations")
-def add_correlation(case_id: str, corr: CorrelationCreate, db: Session = Depends(get_db)):
+def add_correlation(case_id: str, corr: CorrelationCreate, db: Database = Depends(get_db)):
     """Add a correlation between two evidence items"""
-    # Verify case exists
-    case = db.query(Case).filter(Case.id == case_id).first()
-    if not case:
+    if not db.cases.find_one({"_id": case_id}):
         raise HTTPException(status_code=404, detail="Case not found")
-    
-    # Note: Frontend sends 'from' and 'to', but we receive as 'from_evidence' and 'to_evidence'
-    new_correlation = Correlation(
-        case_id=case_id,
-        from_evidence=corr.from_evidence,
-        to_evidence=corr.to_evidence,
-        relationshipType=corr.relationshipType,
-        description=corr.description,
-        created_at=datetime.now()
-    )
-    
-    db.add(new_correlation)
-    db.commit()
-    db.refresh(new_correlation)
-    
+    correlation_id = next_id(db, "correlations")
+    db.correlations.insert_one({
+        "id": correlation_id,
+        "case_id": case_id,
+        "from_evidence": corr.from_evidence,
+        "to_evidence": corr.to_evidence,
+        "relationshipType": corr.relationshipType,
+        "description": corr.description,
+        "created_at": datetime.now(),
+    })
     return {
         "status": "success",
-        "correlation_id": new_correlation.id,
+        "correlation_id": correlation_id,
         "message": "Correlation added successfully"
     }
 
 @app.get("/api/cases/{case_id}/correlations")
-def get_case_correlations(case_id: str, db: Session = Depends(get_db)):
+def get_case_correlations(case_id: str, db: Database = Depends(get_db)):
     """Get all correlations for a specific case"""
-    # Verify case exists
-    case = db.query(Case).filter(Case.id == case_id).first()
-    if not case:
+    if not db.cases.find_one({"_id": case_id}):
         raise HTTPException(status_code=404, detail="Case not found")
-    
-    correlations = db.query(Correlation).filter(
-        Correlation.case_id == case_id
-    ).order_by(Correlation.created_at.desc()).all()
-    
     # Format for frontend (convert from_evidence/to_evidence back to from/to)
     return [{
-        "id": c.id,
-        "from": c.from_evidence,
-        "to": c.to_evidence,
-        "relationshipType": c.relationshipType,
-        "description": c.description,
-        "created_at": c.created_at.strftime("%Y-%m-%d %H:%M:%S")
-    } for c in correlations]
+        "id": c["id"],
+        "from": c["from_evidence"],
+        "to": c["to_evidence"],
+        "relationshipType": c.get("relationshipType"),
+        "description": c.get("description"),
+        "created_at": c["created_at"].strftime("%Y-%m-%d %H:%M:%S"),
+    } for c in db.correlations.find({"case_id": case_id}).sort("created_at", -1)]
 
 @app.delete("/api/cases/{case_id}/correlations/{correlation_id}")
-def delete_correlation(case_id: str, correlation_id: int, db: Session = Depends(get_db)):
+def delete_correlation(case_id: str, correlation_id: int, db: Database = Depends(get_db)):
     """Delete a specific correlation"""
-    correlation = db.query(Correlation).filter(
-        Correlation.id == correlation_id,
-        Correlation.case_id == case_id
-    ).first()
-    
-    if not correlation:
+    res = db.correlations.delete_one({"id": correlation_id, "case_id": case_id})
+    if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Correlation not found")
-    
-    db.delete(correlation)
-    db.commit()
-    
     return {"message": "Correlation deleted successfully"}
 
 # --- END CORRELATION ENDPOINTS ---
@@ -254,29 +195,31 @@ ALLOWED_REL_TYPES = ["Related to", "Found with", "Mentions", "Accessed by", "Con
                      "Connected to", "Transferred data to", "Shared location with"]
 
 @app.post("/api/cases/{case_id}/ai-correlate")
-async def ai_correlate(case_id: str, db: Session = Depends(get_db)):
+async def ai_correlate(case_id: str, db: Database = Depends(get_db)):
     """Ask Groq to suggest correlations between the case's evidence. Suggestions are NOT saved;
     the officer reviews and accepts each one via the normal correlations endpoint."""
     api_key = os.getenv("GROQ_API_KEY", "")
     if not api_key:
         raise HTTPException(status_code=503, detail="GROQ_API_KEY is not configured on the server")
 
-    case = db.query(Case).filter(Case.id == case_id).first()
+    def load():
+        case = db.cases.find_one({"_id": case_id})
+        evidence = list(db.evidences.find({"case_id": case_id}).sort("id", 1))
+        existing = list(db.correlations.find({"case_id": case_id}))
+        return case, evidence, existing
+
+    case, evidence, existing = await run_in_threadpool(load)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
-
-    evidence = db.query(Evidence).filter(Evidence.case_id == case_id).order_by(Evidence.id).all()
     if len(evidence) < 2:
         raise HTTPException(status_code=400, detail="At least 2 evidence items are needed")
-    valid_ids = {f"EVD-{e.id}" for e in evidence}
-
-    existing = db.query(Correlation).filter(Correlation.case_id == case_id).all()
-    existing_pairs = {frozenset((c.from_evidence, c.to_evidence)) for c in existing}
+    valid_ids = {f"EVD-{e['id']}" for e in evidence}
+    existing_pairs = {frozenset((c["from_evidence"], c["to_evidence"])) for c in existing}
 
     items = [{
-        "id": f"EVD-{e.id}", "category": e.category, "collected_date": e.collectedDate,
-        "collected_from": e.collectedFrom, "location": e.location, "document_name": e.documentName,
-        "device_type": e.deviceType, "identifying_info": e.identifyingInfo, "logged_at": e.timestamp,
+        "id": f"EVD-{e['id']}", "category": e.get("category"), "collected_date": e.get("collectedDate"),
+        "collected_from": e.get("collectedFrom"), "location": e.get("location"), "document_name": e.get("documentName"),
+        "device_type": e.get("deviceType"), "identifying_info": e.get("identifyingInfo"), "logged_at": e.get("timestamp"),
     } for e in evidence]
 
     system = (
@@ -290,7 +233,7 @@ async def ai_correlate(case_id: str, db: Session = Depends(get_db)):
         f"relationshipType must be one of: {ALLOWED_REL_TYPES}. Use only the given evidence ids. "
         "Return at most 15 suggestions, strongest first."
     )
-    user = json.dumps({"case": {"id": case.id, "title": case.title, "description": case.description},
+    user = json.dumps({"case": {"id": case["_id"], "title": case.get("title"), "description": case.get("description")},
                        "evidence": items}, default=str)
 
     try:
@@ -338,17 +281,14 @@ async def ai_correlate(case_id: str, db: Session = Depends(get_db)):
 # --- END AI CORRELATION ---
 
 @app.delete("/api/cases/{case_id}")
-def delete_case(case_id: str, db: Session = Depends(get_db)):
+def delete_case(case_id: str, db: Database = Depends(get_db)):
     """Delete a case and all its evidence"""
-    case = db.query(Case).filter(Case.id == case_id).first()
-    if not case:
+    if db.cases.delete_one({"_id": case_id}).deleted_count == 0:
         raise HTTPException(status_code=404, detail="Case not found")
-    
-    db.delete(case)
-    db.commit()
+    db.evidences.delete_many({"case_id": case_id})
+    db.correlations.delete_many({"case_id": case_id})
     return {"message": "Case deleted successfully"}
 
-# --- NEWS API Integration ---
 @app.get("/api/news/cyber")
 async def get_cyber_news():
     """
