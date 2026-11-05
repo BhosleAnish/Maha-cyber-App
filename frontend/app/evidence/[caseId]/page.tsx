@@ -7,7 +7,7 @@ import {
   ShieldAlert, Loader2, Network, X, Plus, Upload, Image, File,
   ZoomIn, ZoomOut, RotateCcw, Maximize2, Tag, Hash, Clock,
   AlertTriangle, Link2, Trash2, Eye, ChevronDown, ChevronUp,
-  Database, Fingerprint, Camera, Server, Wifi, Cpu
+  Database, Fingerprint, Camera, Server, Wifi, Cpu, Sparkles
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -49,6 +49,14 @@ interface Correlation {
   to: string;
   relationshipType: string;
   description: string;
+}
+
+interface AiSuggestion {
+  from: string;
+  to: string;
+  relationshipType: string;
+  description: string;
+  confidence: number;
 }
 
 interface GraphNode {
@@ -108,6 +116,12 @@ export default function EvidencePage() {
   const [tags, setTags] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+
+  // AI correlation state
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[]>([]);
 
   // Correlation state
   const [corrFrom, setCorrFrom] = useState("");
@@ -566,6 +580,43 @@ export default function EvidencePage() {
     }
   };
 
+  const runAiCorrelation = async () => {
+    setShowAiModal(true);
+    setAiLoading(true);
+    setAiError("");
+    setAiSuggestions([]);
+    try {
+      const res = await fetch(`http://localhost:8000/api/cases/${caseId}/ai-correlate`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "AI correlation failed");
+      setAiSuggestions(data.suggestions || []);
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "Network error.");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const acceptAiSuggestion = async (s: AiSuggestion) => {
+    try {
+      const res = await fetch(`http://localhost:8000/api/cases/${caseId}/correlations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from_evidence: s.from, to_evidence: s.to, relationshipType: s.relationshipType,
+          description: `[AI] ${s.description}`,
+        }),
+      });
+      if (res.ok) {
+        const updated = await fetch(`http://localhost:8000/api/cases/${caseId}/correlations`);
+        if (updated.ok) setCorrelations(await updated.json());
+        setAiSuggestions(prev => prev.filter(x => x !== s));
+      }
+    } catch {
+      alert("Network error.");
+    }
+  };
+
   const toggleSection = (s: string) =>
     setShowFormSection(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
 
@@ -614,6 +665,18 @@ export default function EvidencePage() {
             }}
           >
             <Link2 className="w-4 h-4" /> Link Evidence
+          </button>
+          <button
+            onClick={runAiCorrelation}
+            disabled={evidenceList.length < 2 || aiLoading}
+            className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all"
+            style={{
+              background: evidenceList.length < 2 ? "rgba(30,41,59,0.5)" : "rgba(167,139,250,0.12)",
+              border: `1px solid ${evidenceList.length < 2 ? "rgba(71,85,105,0.3)" : "rgba(167,139,250,0.4)"}`,
+              color: evidenceList.length < 2 ? "#475569" : "#a78bfa",
+            }}
+          >
+            {aiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} AI Correlate
           </button>
         </div>
       </div>
@@ -1055,6 +1118,37 @@ export default function EvidencePage() {
           )}
         </div>
       </div>
+
+      {/* ── AI Correlation Modal ── */}
+      {showAiModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)" }}>
+          <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-xl p-6" style={{ background: "rgba(10,15,26,0.98)", border: "1px solid rgba(167,139,250,0.3)" }}>
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="font-bold flex items-center gap-2" style={{ color: "#e2e8f0" }}><Sparkles className="w-4 h-4" style={{ color: "#a78bfa" }} /> AI-Suggested Correlations</h2>
+              <button onClick={() => setShowAiModal(false)}><X className="w-5 h-5" style={{ color: "#475569" }} /></button>
+            </div>
+            <p className="text-xs mb-4" style={{ color: "#64748b" }}>AI suggestions are leads only. Review each against the source evidence before accepting.</p>
+            {aiLoading && <div className="flex items-center gap-2 py-8 justify-center text-sm" style={{ color: "#a78bfa" }}><Loader2 className="w-4 h-4 animate-spin" /> Analysing evidence…</div>}
+            {aiError && <div className="text-sm p-3 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "#fca5a5" }}>{aiError}</div>}
+            {!aiLoading && !aiError && aiSuggestions.length === 0 && <div className="text-sm py-6 text-center" style={{ color: "#64748b" }}>No new correlations found.</div>}
+            <div className="space-y-3">
+              {aiSuggestions.map((s, i) => (
+                <div key={`${s.from}-${s.to}-${i}`} className="p-3 rounded-lg" style={{ background: "rgba(30,41,59,0.5)", border: "1px solid rgba(167,139,250,0.2)" }}>
+                  <div className="flex justify-between items-center gap-2 mb-1">
+                    <div className="text-sm font-bold" style={{ color: "#e2e8f0" }}>{s.from} <span style={{ color: "#a78bfa" }}>— {s.relationshipType} →</span> {s.to}</div>
+                    <span className="text-xs px-2 py-0.5 rounded shrink-0" style={{ background: "rgba(167,139,250,0.12)", color: "#a78bfa" }}>{Math.round(s.confidence * 100)}%</span>
+                  </div>
+                  <p className="text-xs mb-2" style={{ color: "#94a3b8", fontFamily: "sans-serif" }}>{s.description}</p>
+                  <div className="flex gap-2">
+                    <button onClick={() => acceptAiSuggestion(s)} className="px-3 py-1 rounded text-xs font-bold" style={{ background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.4)", color: "#10b981" }}>Accept</button>
+                    <button onClick={() => setAiSuggestions(prev => prev.filter(x => x !== s))} className="px-3 py-1 rounded text-xs" style={{ background: "rgba(30,41,59,0.5)", border: "1px solid rgba(71,85,105,0.3)", color: "#64748b" }}>Dismiss</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Correlation Modal ── */}
       {showCorrelationModal && (

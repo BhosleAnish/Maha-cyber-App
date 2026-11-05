@@ -6,11 +6,16 @@ from datetime import datetime
 import uvicorn
 import httpx
 import os
+import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # SQLAlchemy imports
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from models import Base, Case, Evidence, Correlation
+from auth import router as auth_router
 
 # --- Database Setup (SQLite for local testing) ---
 SQLALCHEMY_DATABASE_URL = "sqlite:///./maha_cyber.db"
@@ -30,6 +35,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 # --- Dependency: Get Database Session ---
 def get_db():
@@ -234,6 +241,96 @@ def delete_correlation(case_id: str, correlation_id: int, db: Session = Depends(
     return {"message": "Correlation deleted successfully"}
 
 # --- END CORRELATION ENDPOINTS ---
+
+# --- AI CORRELATION (Groq) ---
+
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+ALLOWED_REL_TYPES = ["Related to", "Found with", "Mentions", "Accessed by", "Contains", "References",
+                     "Connected to", "Transferred data to", "Shared location with"]
+
+@app.post("/api/cases/{case_id}/ai-correlate")
+async def ai_correlate(case_id: str, db: Session = Depends(get_db)):
+    """Ask Groq to suggest correlations between the case's evidence. Suggestions are NOT saved;
+    the officer reviews and accepts each one via the normal correlations endpoint."""
+    api_key = os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="GROQ_API_KEY is not configured on the server")
+
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    evidence = db.query(Evidence).filter(Evidence.case_id == case_id).order_by(Evidence.id).all()
+    if len(evidence) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 evidence items are needed")
+    valid_ids = {f"EVD-{e.id}" for e in evidence}
+
+    existing = db.query(Correlation).filter(Correlation.case_id == case_id).all()
+    existing_pairs = {frozenset((c.from_evidence, c.to_evidence)) for c in existing}
+
+    items = [{
+        "id": f"EVD-{e.id}", "category": e.category, "collected_date": e.collectedDate,
+        "collected_from": e.collectedFrom, "location": e.location, "document_name": e.documentName,
+        "device_type": e.deviceType, "identifying_info": e.identifyingInfo, "logged_at": e.timestamp,
+    } for e in evidence]
+
+    system = (
+        "You are a digital-forensics analyst assisting an Indian cybercrime investigation. "
+        "Given a case and its evidence items, find meaningful links between pairs of evidence "
+        "(shared person/collection source, same location, overlapping dates, matching device or "
+        "identifiers such as IMEI/phone/account/IP, document-to-device relationships). "
+        "Only report links supported by the data provided; never invent facts. "
+        'Respond with JSON only: {"suggestions":[{"from":"EVD-1","to":"EVD-2","relationshipType":"...",'
+        '"description":"one or two sentences citing the matching fields","confidence":0.0-1.0}]}. '
+        f"relationshipType must be one of: {ALLOWED_REL_TYPES}. Use only the given evidence ids. "
+        "Return at most 15 suggestions, strongest first."
+    )
+    user = json.dumps({"case": {"id": case.id, "title": case.title, "description": case.description},
+                       "evidence": items}, default=str)
+
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(
+                GROQ_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.2,
+                },
+            )
+        r.raise_for_status()
+        raw = json.loads(r.json()["choices"][0]["message"]["content"])
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Groq API error ({e.response.status_code})")
+    except (httpx.HTTPError, KeyError, ValueError):
+        raise HTTPException(status_code=502, detail="AI service unavailable or returned invalid output")
+
+    suggestions = []
+    for s in raw.get("suggestions", []) if isinstance(raw, dict) else []:
+        if not isinstance(s, dict):
+            continue
+        a, b = s.get("from"), s.get("to")
+        if a not in valid_ids or b not in valid_ids or a == b:
+            continue
+        if frozenset((a, b)) in existing_pairs:
+            continue
+        rel = s.get("relationshipType")
+        try:
+            conf = max(0.0, min(1.0, float(s.get("confidence", 0.5))))
+        except (TypeError, ValueError):
+            conf = 0.5
+        suggestions.append({
+            "from": a, "to": b,
+            "relationshipType": rel if rel in ALLOWED_REL_TYPES else "Related to",
+            "description": str(s.get("description", ""))[:500],
+            "confidence": conf,
+        })
+        existing_pairs.add(frozenset((a, b)))
+    return {"suggestions": suggestions}
+
+# --- END AI CORRELATION ---
 
 @app.delete("/api/cases/{case_id}")
 def delete_case(case_id: str, db: Session = Depends(get_db)):

@@ -54,3 +54,25 @@ class Correlation(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     case = relationship("Case", back_populates="correlations")
+
+class Officer(Base):
+    """Portal login account (email + password; MFA via emailed OTP)."""
+    __tablename__ = "officers"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    badge_number = Column(String, unique=True, index=True)
+    email = Column(String, unique=True, index=True)
+    password_hash = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LoginOtp(Base):
+    """One pending MFA challenge. The OTP itself is stored only as a hash."""
+    __tablename__ = "login_otps"
+    id = Column(String, primary_key=True)  # random challenge id
+    officer_id = Column(Integer, ForeignKey("officers.id"), index=True)
+    otp_hash = Column(String)
+    expires_at = Column(DateTime)
+    attempts = Column(Integer, default=0)
+    used = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)

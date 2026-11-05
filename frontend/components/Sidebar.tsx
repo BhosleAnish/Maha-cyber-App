@@ -1,7 +1,19 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { LayoutDashboard, FileText, Scale, BookOpen, ShieldAlert, ArrowLeftRight } from "lucide-react";
 
 export default function Sidebar() {
+  const pathname = usePathname();
+  const { data: session } = useSession();
+  if (pathname === "/login") return null;
+
+  const name = session?.user?.name ?? "Officer";
+  const badge = (session?.user as { badge?: string } | undefined)?.badge;
+  const initials = name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+
   return (
     <div className="w-64 bg-slate-900 text-white h-full flex flex-col shadow-xl">
       <div className="p-6 flex items-center gap-3 border-b border-slate-700">
@@ -38,11 +50,11 @@ export default function Sidebar() {
       <div className="p-4 border-t border-slate-700">
         <div className="flex items-center gap-3 p-2 bg-slate-800 rounded-lg">
           <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center font-bold">
-            JD
+            {initials}
           </div>
           <div>
-            <p className="text-sm font-medium">Insp. John Doe</p>
-            <p className="text-xs text-slate-400">ID: MC-2849</p>
+            <p className="text-sm font-medium">{name}</p>
+            <p className="text-xs text-slate-400">{badge ? `ID: ${badge}` : ""}</p>
           </div>
         </div>
       </div>

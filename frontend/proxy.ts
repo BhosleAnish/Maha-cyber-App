@@ -4,6 +4,6 @@ import { withAuth } from "next-auth/middleware";
 export default withAuth;
 
 export const config = {
-  // Protects all pages except static files and APIs
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"]
+  // Protects all pages except /login, static files and APIs
+  matcher: ["/((?!api|login|_next/static|_next/image|favicon.ico).*)"]
 };
