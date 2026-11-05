@@ -24,3 +24,9 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@media print {
+  html, body { height: auto !important; overflow: visible !important; display: block !important; background: #fff !important; }
+  main { display: block !important; overflow: visible !important; }
+  @page { size: A4; margin: 10mm; }
+}

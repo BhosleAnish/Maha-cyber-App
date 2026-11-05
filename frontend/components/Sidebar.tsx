@@ -15,7 +15,7 @@ export default function Sidebar() {
   const initials = name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
   return (
-    <div className="w-64 bg-slate-900 text-white h-full flex flex-col shadow-xl">
+    <div className="w-64 bg-slate-900 text-white h-full flex flex-col shadow-xl print:hidden">
       <div className="p-6 flex items-center gap-3 border-b border-slate-700">
         <ShieldAlert className="text-blue-400" size={32} />
         <div>
